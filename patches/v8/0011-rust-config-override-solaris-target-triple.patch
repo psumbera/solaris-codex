@@ -1,0 +1,47 @@
+This patch is needed because Chromium derives the Rust standard library target
+triple from GN OS settings, but the Solaris wrapper sometimes drives GN through
+Linux-compatible branches.
+
+What it does:
+- adds an explicit Rust target triple override in Chromium Rust config
+- uses that override before the default OS-derived target logic
+
+Why it is needed:
+- without it, the build looks for the wrong Rust stdlib directory instead of
+  the Solaris standalone toolchain target triple
+
+--- a/v8-146.4.0/build/config/rust.gni
++++ b/v8-146.4.0/build/config/rust.gni
+@@ -63,6 +63,11 @@
+   # the bindgen exectuable).
+   rust_bindgen_root = "//third_party/rust-toolchain"
+ 
++  # Downstream wrappers can override Chromium's OS-derived Rust target triple
++  # when GN host compatibility workarounds would otherwise select the wrong
++  # standard library directory.
++  rust_abi_target_override = ""
++
+   # If you're using a Rust toolchain as specified by rust_sysroot_absolute,
+   # set this to the output of `rustc -V`. Changing this string will cause all
+   # Rust targets to be rebuilt, which allows you to update your toolchain and
+@@ -204,7 +209,9 @@
+ # (see '*_toolchain_supports_platform above') to enable experimentation with
+ # other toolchains.
+ rust_abi_target = ""
+-if (is_linux || is_chromeos) {
++if (rust_abi_target_override != "") {
++  rust_abi_target = rust_abi_target_override
++} else if (is_linux || is_chromeos) {
+   if (current_cpu == "arm64") {
+     rust_abi_target = "aarch64-unknown-linux-gnu"
+   } else if (current_cpu == "x86") {
+--- a/v8-146.4.0/build/rust/known-target-triples.txt
++++ b/v8-146.4.0/build/rust/known-target-triples.txt
+@@ -39,6 +39,7 @@
+ x86_64-apple-tvos
+ x86_64-linux-android
+ x86_64-pc-windows-msvc
++x86_64-pc-solaris
+ x86_64-unknown-fuchsia
+ x86_64-unknown-linux-gnu
+ powerpc64le-unknown-linux-gnu

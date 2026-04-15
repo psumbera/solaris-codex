@@ -1,0 +1,10 @@
+This patch is needed because Solaris /usr/bin/ar does not support GNU -D or
+response file syntax in Chromium default archive rules.
+
+What it does:
+- adds a Solaris specific alink branch
+- avoids both GNU -D and @rsp usage there
+- archives inputs directly with Solaris ar
+
+Why it is needed:
+- without it, final static archive creation fails on Solaris while building V8

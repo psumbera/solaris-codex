@@ -1,0 +1,68 @@
+This patch is needed because V8's POSIX trap-handler code already works with
+Solaris signal context structures, but the upstream cfg gates do not enable that
+path for Solaris.
+
+What it does:
+- enables the POSIX trap-handler code path on Solaris
+- extends the affected architecture-specific context guards accordingly
+
+Why it is needed:
+- without it, the Solaris x64 build leaves trap-handler support on the wrong
+  platform branch
+
+--- a/v8-146.4.0/v8/src/trap-handler/handler-inside-posix.cc
++++ b/v8-146.4.0/v8/src/trap-handler/handler-inside-posix.cc
+@@ -28,7 +28,7 @@
+ 
+ #include <signal.h>
+ 
+-#if defined(V8_OS_LINUX) || defined(V8_OS_FREEBSD)
++#if defined(V8_OS_LINUX) || defined(V8_OS_FREEBSD) || defined(V8_OS_SOLARIS)
+ #include <ucontext.h>
+ #elif V8_OS_DARWIN
+ #include <sys/ucontext.h>
+@@ -50,11 +50,11 @@ namespace trap_handler {
+ 
+ #if V8_TRAP_HANDLER_SUPPORTED
+ 
+-#if V8_OS_LINUX && V8_HOST_ARCH_ARM64
++#if (V8_OS_LINUX || V8_OS_SOLARIS) && V8_HOST_ARCH_ARM64
+ #define CONTEXT_REG(reg, REG) &uc->uc_mcontext.regs[REG]
+ #elif V8_OS_LINUX && (V8_HOST_ARCH_LOONG64 || V8_HOST_ARCH_RISCV64)
+ #define CONTEXT_REG(reg, REG) &uc->uc_mcontext.__gregs[REG]
+-#elif V8_OS_LINUX
++#elif V8_OS_LINUX || V8_OS_SOLARIS
+ #define CONTEXT_REG(reg, REG) &uc->uc_mcontext.gregs[REG_##REG]
+ #elif V8_OS_DARWIN && V8_HOST_ARCH_ARM64
+ #define CONTEXT_REG(reg, REG) &uc->uc_mcontext->__ss.__x[REG]
+--- a/v8-146.4.0/v8/src/trap-handler/handler-inside-posix.h
++++ b/v8-146.4.0/v8/src/trap-handler/handler-inside-posix.h
+@@ -13,12 +13,12 @@ namespace v8 {
+ namespace internal {
+ namespace trap_handler {
+ 
+-#if V8_OS_LINUX || V8_OS_FREEBSD
++#if V8_OS_LINUX || V8_OS_FREEBSD || V8_OS_SOLARIS
+ constexpr int kOobSignal = SIGSEGV;
+ #elif V8_OS_DARWIN
+ constexpr int kOobSignal = SIGBUS;
+ #else
+-#error Posix trap handlers are only supported on Linux, MacOSX and FreeBSD.
++#error Posix trap handlers are only supported on Linux, MacOSX, FreeBSD and Solaris.
+ #endif
+ 
+ void HandleSignal(int signum, siginfo_t* info, void* context);
+--- a/v8-146.4.0/v8/src/trap-handler/trap-handler.h
++++ b/v8-146.4.0/v8/src/trap-handler/trap-handler.h
+@@ -15,10 +15,10 @@ namespace v8::internal::trap_handler {
+ 
+ // X64 on Linux, Windows, MacOS, FreeBSD.
+ #if V8_HOST_ARCH_X64 && V8_TARGET_ARCH_X64 &&                        \
+-    ((V8_OS_LINUX && !V8_OS_ANDROID) || V8_OS_WIN || V8_OS_DARWIN || \
+-     V8_OS_FREEBSD)
++    ((V8_OS_LINUX && !V8_OS_ANDROID) || V8_OS_WIN || V8_OS_DARWIN ||   \
++     V8_OS_FREEBSD || V8_OS_SOLARIS)
+ #define V8_TRAP_HANDLER_SUPPORTED true
+ // Arm64 native on Linux, Windows, MacOS.
+ #elif V8_TARGET_ARCH_ARM64 && V8_HOST_ARCH_ARM64 && \
+     ((V8_OS_LINUX && !V8_OS_ANDROID) || V8_OS_WIN || V8_OS_DARWIN)

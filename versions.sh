@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+SOLARIS_CODEX_VERSION=0.122.0
+RUST_VERSION=1.93.0
+BINDGEN_CLI_VERSION=0.72.0
+RUST_TRIPLE=x86_64-pc-solaris
+GN_VERSION=2026.03.24
+V8_VERSION=146.4.0
+
+GN_GIT_URL=${GN_GIT_URL:-https://gn.googlesource.com/gn}
+GN_GIT_REF=${GN_GIT_REF:-b2ac0e7a9089039e62b84d246eca83f84c540f76}
+
+V8_GIT_URL=${V8_GIT_URL:-https://github.com/denoland/rusty_v8.git}
+V8_GIT_REF=${V8_GIT_REF:-v${V8_VERSION}}
+
+CODEX_GIT_URL=${CODEX_GIT_URL:-https://github.com/openai/codex.git}
+CODEX_GIT_REF=${CODEX_GIT_REF:-rust-v${SOLARIS_CODEX_VERSION}}

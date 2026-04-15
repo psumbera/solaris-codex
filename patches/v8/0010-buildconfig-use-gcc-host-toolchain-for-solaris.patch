@@ -1,0 +1,23 @@
+This patch is needed because Chromium's host toolchain selection treats only
+Linux as compatible with the Linux host toolchain path, but the Solaris wrapper
+uses that host-toolchain route as a compatibility workaround.
+
+What it does:
+- allows Solaris target builds to keep using the Linux host toolchain selection
+  branch during GN setup
+
+Why it is needed:
+- without it, GN picks the wrong host toolchain branch for the Solaris wrapper
+  build
+
+--- a/v8-146.4.0/build/config/BUILDCONFIG.gn
++++ b/v8-146.4.0/build/config/BUILDCONFIG.gn
+@@ -204,7 +204,7 @@
+   # no toolchain omitted host_toolchain from its toolchain_args().
+ 
+   if (host_os == "linux") {
+-    if (target_os != "linux") {
++    if (target_os != "linux" && target_os != "solaris") {
+       host_toolchain = "//build/toolchain/linux:clang_$host_cpu"
+     } else if (is_clang) {
+       host_toolchain = "//build/toolchain/linux:clang_$host_cpu"

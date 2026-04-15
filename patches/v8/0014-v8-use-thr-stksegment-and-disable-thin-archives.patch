@@ -1,0 +1,52 @@
+This patch is needed because Solaris stack-segment discovery and archive tool
+behavior differ from the Linux-oriented defaults in Chromium and V8.
+
+What it does:
+- includes thr_stksegment support for the Solaris V8 platform code
+- disables thin-archive usage in the affected Solaris compiler config path
+
+Why it is needed:
+- without it, the Solaris build either uses the wrong stack helpers or hits
+  archive handling that the Solaris toolchain does not support correctly
+
+--- a/v8-146.4.0/build/config/compiler/BUILD.gn
++++ b/v8-146.4.0/build/config/compiler/BUILD.gn
+@@ -2552,7 +2552,7 @@
+-  } else if ((is_posix && (!is_apple || use_lld)) || is_fuchsia) {
++  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
+     # The macOS and iOS default linker ld64 does not support reading thin
+     # archives.
+     arflags = [
+       "-T",
+       "-S",
+     ]
+--- a/v8-146.4.0/v8/src/base/platform/platform-solaris.cc
++++ b/v8-146.4.0/v8/src/base/platform/platform-solaris.cc
+@@ -18,6 +18,7 @@
+ #include <sys/mman.h>  // mmap()
+ #include <sys/regset.h>
+ #include <sys/stack.h>  // for stack alignment
++#include <thread.h>  // thr_stksegment
+ #include <sys/time.h>  // gettimeofday(), timeradd()
+ #include <time.h>
+ #include <ucontext.h>  // walkstack(), getcontext()
+@@ -75,16 +76,8 @@
+ Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
+-  pthread_attr_t attr;
+-  int error;
+-  pthread_attr_init(&attr);
+-  error = pthread_attr_get_np(pthread_self(), &attr);
++  stack_t stack;
++  int error = thr_stksegment(&stack);
+   if (!error) {
+-    void* base;
+-    size_t size;
+-    error = pthread_attr_getstack(&attr, &base, &size);
+-    CHECK(!error);
+-    pthread_attr_destroy(&attr);
+-    return reinterpret_cast<uint8_t*>(base) + size;
++    return stack.ss_sp;
+   }
+-  pthread_attr_destroy(&attr);
+   return nullptr;
+ }

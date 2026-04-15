@@ -1,0 +1,15 @@
+This patch is needed because Chromium's Linux non-clang archive branch assumes
+GNU thin-archive behavior that does not match Solaris archiver support.
+
+What it does:
+- keeps the Linux thin-archive branch from firing on Solaris targets
+
+Why it is needed:
+- without it, the build tries to use a Linux archive path that Solaris ar does
+  not support
+
+--- a/v8-146.4.0/build/config/compiler/BUILD.gn
++++ b/v8-146.4.0/build/config/compiler/BUILD.gn
+@@ -2544 +2544 @@
+-  if ((is_apple && use_lld) || (is_linux && !is_clang) || current_os == "aix") {
++  if ((is_apple && use_lld) || (is_linux && current_os != "solaris" && !is_clang) || current_os == "aix") {

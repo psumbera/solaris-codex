@@ -1,0 +1,19 @@
+This patch is needed because the earlier thin-archive workaround must key off
+target_os rather than current_os when host and target compatibility branches are
+mixed during the Solaris wrapper build.
+
+What it does:
+- switches the Solaris thin-archive guards from current_os to target_os
+
+Why it is needed:
+- without it, cross-checked GN conditions can still route Solaris targets into
+  the wrong archive branch
+
+--- a/v8-146.4.0/build/config/compiler/BUILD.gn
++++ b/v8-146.4.0/build/config/compiler/BUILD.gn
+@@ -2544 +2544 @@
+-  if ((is_apple && use_lld) || (is_linux && current_os != "solaris" && !is_clang) || current_os == "aix") {
++  if ((is_apple && use_lld) || (is_linux && target_os != "solaris" && !is_clang) || current_os == "aix") {
+@@ -2552 +2552 @@
+-  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
++  } else if ((is_posix && target_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {

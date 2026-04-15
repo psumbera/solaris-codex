@@ -1,0 +1,62 @@
+This patch is needed because upstream V8 mostly routes Solaris through generic
+POSIX paths, but a few source selections need Solaris-specific handling.
+
+What it does:
+- adds Solaris-specific platform source selection in V8 build rules
+- avoids POSIX time source choices that do not fit the Solaris port
+
+Why it is needed:
+- without it, the V8 build selects the wrong source files for the Solaris
+  platform layer
+
+--- a/v8-146.4.0/v8/BUILD.gn
++++ b/v8-146.4.0/v8/BUILD.gn
+@@ -7122,22 +7122,28 @@
+       "src/base/platform/platform-posix.cc",
+       "src/base/platform/platform-posix.h",
+     ]
+-    if (current_os != "aix" && current_os != "zos") {
++    if (current_os != "aix" && current_os != "zos" && current_os != "solaris") {
+       sources += [
+         "src/base/platform/platform-posix-time.cc",
+         "src/base/platform/platform-posix-time.h",
+       ]
+     }
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (current_os == "solaris") {
++    sources += [
++      "src/base/debug/stack_trace_posix.cc",
++      "src/base/platform/platform-solaris.cc",
++    ]
++    libs = [ "dl", "rt" ]
++  } else if (is_linux || is_chromeos) {
+     sources += [
+       "src/base/debug/stack_trace_posix.cc",
+       "src/base/platform/platform-linux.cc",
+       "src/base/platform/platform-linux.h",
+     ]
+ 
+     libs = [
+       "dl",
+       "rt",
+     ]
+--- a/v8-146.4.0/v8/src/base/platform/platform-posix.cc
++++ b/v8-146.4.0/v8/src/base/platform/platform-posix.cc
+@@ -81,15 +81,7 @@
+ #if V8_OS_FREEBSD || V8_OS_DARWIN || V8_OS_OPENBSD || V8_OS_SOLARIS
+ #define MAP_ANONYMOUS MAP_ANON
+ #endif
+ 
+-#if defined(V8_OS_SOLARIS)
+-#if (defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE > 2) || defined(__EXTENSIONS__)
+-extern "C" int madvise(caddr_t, size_t, int);
+-#else
+-extern int madvise(caddr_t, size_t, int);
+-#endif
+-#endif
+-
+ #ifndef MADV_FREE
+ #define MADV_FREE MADV_DONTNEED
+ #endif

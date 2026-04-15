@@ -1,0 +1,14 @@
+This patch is needed because the Solaris wrapper drives Chromium Rust helper
+rules with a stable standalone toolchain instead of the Chromium bundled
+nightly oriented environment.
+
+What it does:
+- filters Solaris unsupported linker flags before forwarding link args to rustc
+- strips Chromium only -Z flags from rsp content
+- enables RUSTC_BOOTSTRAP=1 in the wrapper environment
+- exits immediately on rustc failure
+- synthesizes a minimal depfile when Solaris rustc does not emit one
+
+Why it is needed:
+- without it, V8 Rust helper crates fail on unsupported linker flags, nightly
+  only flags, or missing depfiles on Solaris

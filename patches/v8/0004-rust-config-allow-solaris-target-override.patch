@@ -1,0 +1,51 @@
+This patch is needed because the Solaris wrapper currently drives GN with
+`host_os="linux"` as a compatibility workaround, but Chromium's Rust config
+then derives the wrong stdlib target triple.
+
+What it does:
+- adds a `rust_abi_target_override` GN arg in Chromium's Rust config
+- uses that override before the normal OS-derived target selection
+- registers `x86_64-pc-solaris` as a known Rust target triple
+
+Why it is needed:
+- without it, V8's Rust helper rules look for
+  `lib/rustlib/x86_64-unknown-linux-gnu`, while the standalone Solaris Rust
+  toolchain only provides `lib/rustlib/x86_64-pc-solaris`
+
+--- a/v8-146.4.0/build/config/rust.gni
++++ b/v8-146.4.0/build/config/rust.gni
+@@ -63,6 +63,11 @@ declare_args() {
+   # the bindgen exectuable).
+   rust_bindgen_root = "//third_party/rust-toolchain"
+ 
++  # Downstream wrappers can override Chromium's OS-derived Rust target triple
++  # when GN host compatibility workarounds would otherwise select the wrong
++  # standard library directory.
++  rust_abi_target_override = ""
++
+   # If you're using a Rust toolchain as specified by rust_sysroot_absolute,
+   # set this to the output of `rustc -V`. Changing this string will cause all
+   # Rust targets to be rebuilt, which allows you to update your toolchain and
+@@ -203,7 +208,9 @@
+ # https://doc.rust-lang.org/nightly/rustc/platform-support.html. We map Chromium
+ # targets to Rust targets comprehensively despite not having official support
+ # (see '*_toolchain_supports_platform above') to enable experimentation with
+ # other toolchains.
+ rust_abi_target = ""
+-if (is_linux || is_chromeos) {
++if (rust_abi_target_override != "") {
++  rust_abi_target = rust_abi_target_override
++} else if (is_linux || is_chromeos) {
+   if (current_cpu == "arm64") {
+     rust_abi_target = "aarch64-unknown-linux-gnu"
+   } else if (current_cpu == "x86") {
+--- a/v8-146.4.0/build/rust/known-target-triples.txt
++++ b/v8-146.4.0/build/rust/known-target-triples.txt
+@@ -31,6 +31,7 @@ x86_64-apple-ios-macabi
+ x86_64-apple-tvos
+ x86_64-linux-android
+ x86_64-pc-windows-msvc
++x86_64-pc-solaris
+ x86_64-unknown-fuchsia
+ x86_64-unknown-linux-gnu
+ powerpc64le-unknown-linux-gnu

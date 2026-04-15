@@ -1,0 +1,35 @@
+This patch is needed because the Solaris wrapper prunes selected Rust stdlib
+archives, and Chromium's Rust stdlib copy logic needs a matching skip list for
+non-linked copied libraries.
+
+What it does:
+- adds a removed_rust_skip_stdlib_libs GN knob
+- removes those libraries from the copied skip-stdlib set as well
+
+Why it is needed:
+- without it, Chromium still expects removed stdlib artifacts that the Solaris
+  wrapper intentionally excludes
+
+--- a/v8-146.4.0/build/config/rust.gni
++++ b/v8-146.4.0/build/config/rust.gni
+@@ -90,6 +90,10 @@
+   # Rust toolchain. Typically used with 'rust_sysroot_absolute'
+   removed_rust_stdlib_libs = []
+ 
++  # Any removed std rlibs which are normally copied into the sysroot but not
++  # passed to the C++ linker.
++  removed_rust_skip_stdlib_libs = []
++
+   # Non-rlib libs provided in the toolchain sysroot. Usually this is empty, but
+   # e.g. the Android Rust Toolchain provides a libunwind.a that rustc expects.
+   extra_sysroot_libs = []
+--- a/v8-146.4.0/build/rust/std/BUILD.gn
++++ b/v8-146.4.0/build/rust/std/BUILD.gn
+@@ -84,6 +84,7 @@
+     "rustc_std_workspace_core",
+     "rustc_std_workspace_std",
+   ]
++    skip_stdlib_files -= removed_rust_skip_stdlib_libs
+ 
+   config("stdlib_dependent_libs") {
+     # TODO(crbug.com/40264561): These should really be `libs`, however that

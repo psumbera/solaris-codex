@@ -1,0 +1,17 @@
+# Build outputs
+/build/
+/sources/
+/build.log
+/build.exit
+
+# Local scratch / backups
+/build-codex.sh.bak-*
+/repro-mio-tty/
+
+# Patching leftovers
+*.orig
+*.rej
+
+# macOS / AppleDouble metadata
+.DS_Store
+._*

@@ -1,0 +1,22 @@
+This patch is needed because Chromium C++ modules derive a platform label from
+current_os, but the Solaris wrapper reuses the Linux sysroot-style module
+layout.
+
+What it does:
+- maps Solaris to the Linux module platform naming path
+
+Why it is needed:
+- without it, the module platform name does not match the sysroot layout used
+  by the Solaris wrapper build
+
+--- a/v8-146.4.0/build/config/c++/modules.gni
++++ b/v8-146.4.0/build/config/c++/modules.gni
+@@ -20,7 +20,7 @@
+ }
+ 
+ module_platform = "${current_os}-${current_cpu}"
+-if (is_chromeos) {
++if (is_chromeos || current_os == "solaris") {
+   # ChromeOS uses the linux sysroot.
+   module_platform = "linux"
+ } else if (is_fuchsia || is_mac || is_linux || is_win) {

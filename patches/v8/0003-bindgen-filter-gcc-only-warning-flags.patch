@@ -1,0 +1,44 @@
+This patch is needed because Chromium forwards compiler warning flags into
+`bindgen`, but on Solaris the libclang frontend is not using the same warning
+set as the GCC-based V8 compile.
+
+What it does:
+- drops `-Werror` for bindgen invocations
+- filters warning flags that Solaris libclang rejects
+- keeps the normal compiler warning set for the actual C/C++ build
+
+Why it is needed:
+- with `DISABLE_CLANG=1`, the V8 build can use the native Solaris GCC toolchain
+  successfully, but bindgen still fails early on GCC-specific warning options
+
+--- a/v8-146.4.0/build/rust/gni_impl/filter_clang_args.py
++++ b/v8-146.4.0/build/rust/gni_impl/filter_clang_args.py
+@@ -12,19 +12,28 @@
+ This function filters them out.
+ """
+ 
++BLOCKLIST = {
++    '-Werror',
++    '-Wno-maybe-uninitialized',
++    '-Wno-packed-not-aligned',
++    '-Wno-class-memaccess',
++}
++
+ 
+ def filter_clang_args(clangargs):
+ 
+   def do_filter(args):
+     i = 0
+     while i < len(args):
+       # Intercept plugin arguments
+       if args[i] == '-Xclang':
+         i += 1
+         if args[i] == '-add-plugin':
+           pass
+         elif args[i].startswith('-plugin-arg'):
+           i += 2
++      elif args[i] in BLOCKLIST:
++        pass
+       else:
+         yield args[i]
+       i += 1

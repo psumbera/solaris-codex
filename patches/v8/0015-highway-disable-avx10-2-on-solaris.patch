@@ -1,0 +1,21 @@
+This patch is needed because the Highway AVX10.2 enablement logic assumes tool
+versions and assembler support that do not hold on the Solaris toolchain.
+
+What it does:
+- forces AVX10.2 detection off on Solaris
+
+Why it is needed:
+- without it, Highway can enable instructions that the Solaris compiler or
+  assembler path cannot handle reliably
+
+--- a/v8-146.4.0/third_party/highway/src/hwy/detect_targets.h
++++ b/v8-146.4.0/third_party/highway/src/hwy/detect_targets.h
+@@ -198,7 +198,7 @@
+ // AVX10_2 requires clang >= 20.1 (postpone to 23 due to "avx10.2-512" remnant,
+ // only removed in https://github.com/llvm/llvm-project/pull/157034) or
+ // gcc >= 15.2 with binutils 2.44.
+-#if (HWY_COMPILER_CLANG < 2300) && (HWY_COMPILER_GCC_ACTUAL < 1502)
++#if defined(__sun) || ((HWY_COMPILER_CLANG < 2300) && (HWY_COMPILER_GCC_ACTUAL < 1502))
+ #define HWY_BROKEN_AVX10_2 HWY_AVX10_2
+ #else
+ #define HWY_BROKEN_AVX10_2 0
