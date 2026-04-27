@@ -11,9 +11,11 @@ Why it is needed:
 - without it, the Solaris TUI can miss input, stall during startup, or render
   poorly in terminals commonly used on Solaris systems
 
+diff --git a/codex-rs/tui/src/bottom_pane/chat_composer.rs b/codex-rs/tui/src/bottom_pane/chat_composer.rs
+index a529d16..32e0ba9 100644
 --- a/codex-rs/tui/src/bottom_pane/chat_composer.rs
 +++ b/codex-rs/tui/src/bottom_pane/chat_composer.rs
-@@ -186,6 +186,7 @@
+@@ -186,6 +186,7 @@ use crate::bottom_pane::prompt_args::parse_slash_name;
  use crate::render::Insets;
  use crate::render::RectExt;
  use crate::render::renderable::Renderable;
@@ -21,9 +23,9 @@ Why it is needed:
  use crate::slash_command::SlashCommand;
  use crate::style::user_message_style;
  use codex_protocol::models::local_image_label_text;
-@@ -4036,11 +4037,15 @@
-             let prompt = if self.input_enabled {
-                 if is_zellij {
+@@ -4148,11 +4149,15 @@ impl ChatComposer {
+                     }
+                 } else if is_zellij {
                      Span::styled("›", style.fg(ratatui::style::Color::Cyan))
 +                } else if use_ascii_ui() {
 +                    ">".bold()
@@ -37,9 +39,11 @@ Why it is needed:
              } else {
                  "›".dim()
              };
+diff --git a/codex-rs/tui/src/bottom_pane/footer.rs b/codex-rs/tui/src/bottom_pane/footer.rs
+index 4c8b181..4738076 100644
 --- a/codex-rs/tui/src/bottom_pane/footer.rs
 +++ b/codex-rs/tui/src/bottom_pane/footer.rs
-@@ -45,6 +45,7 @@
+@@ -45,6 +45,7 @@ use crate::key_hint;
  use crate::key_hint::KeyBinding;
  use crate::render::line_utils::prefix_lines;
  use crate::status::format_tokens_compact;
@@ -47,7 +51,7 @@ Why it is needed:
  use crate::ui_consts::FOOTER_INDENT_COLS;
  use crossterm::event::KeyCode;
  use ratatui::buffer::Buffer;
-@@ -296,7 +297,7 @@
+@@ -296,7 +297,7 @@ fn left_side_line(
  
      if let Some(collaboration_mode_indicator) = collaboration_mode_indicator {
          if !matches!(state.hint, SummaryHintKind::None) {
@@ -56,7 +60,7 @@ Why it is needed:
          }
          line.push_span(collaboration_mode_indicator.styled_span(state.show_cycle_hint));
      }
-@@ -662,7 +663,7 @@
+@@ -662,7 +663,7 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
  
      if let Some(active_agent_label) = props.active_agent_label.as_ref() {
          if let Some(existing) = line.as_mut() {
@@ -65,25 +69,30 @@ Why it is needed:
              existing.spans.push(active_agent_label.clone().into());
          } else {
              line = Some(Line::from(active_agent_label.clone()));
---- a/codex-rs/tui/src/bottom_pane/status_line_setup.rs
-+++ b/codex-rs/tui/src/bottom_pane/status_line_setup.rs
-@@ -34,6 +34,7 @@
- use crate::bottom_pane::multi_select_picker::MultiSelectItem;
- use crate::bottom_pane::multi_select_picker::MultiSelectPicker;
- use crate::render::renderable::Renderable;
-+use crate::terminal_palette::use_ascii_ui;
+diff --git a/codex-rs/tui/src/bottom_pane/status_surface_preview.rs b/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
+index 93fca82..64d48a1 100644
+--- a/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
++++ b/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
+@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
  
- /// Available items that can be displayed in the status line.
- ///
-@@ -163,7 +164,7 @@
-             .filter_map(|item| item.id.parse::<StatusLineItem>().ok())
-             .filter_map(|item| self.values.get(&item).cloned())
+ use ratatui::text::Line;
+ 
++use crate::terminal_palette::use_ascii_ui;
++
+ #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+ pub(crate) enum StatusSurfacePreviewItem {
+     AppName,
+@@ -163,7 +165,7 @@ impl StatusSurfacePreviewData {
+             .into_iter()
+             .filter_map(|item| self.value_for(item))
              .collect::<Vec<_>>()
 -            .join(" · ");
 +            .join(if use_ascii_ui() { " | " } else { " · " });
          if preview.is_empty() {
              None
          } else {
+diff --git a/codex-rs/tui/src/chatwidget/status_surfaces.rs b/codex-rs/tui/src/chatwidget/status_surfaces.rs
+index 94ed216..6ec201e 100644
 --- a/codex-rs/tui/src/chatwidget/status_surfaces.rs
 +++ b/codex-rs/tui/src/chatwidget/status_surfaces.rs
 @@ -4,6 +4,7 @@
@@ -94,7 +103,7 @@ Why it is needed:
  
  /// Items shown in the terminal title when the user has not configured a
  /// custom selection. Intentionally minimal: spinner + project name.
-@@ -152,7 +153,7 @@
+@@ -152,7 +153,7 @@ impl ChatWidget {
          let line = if parts.is_empty() {
              None
          } else {
@@ -103,9 +112,11 @@ Why it is needed:
          };
          self.set_status_line(line);
      }
+diff --git a/codex-rs/tui/src/custom_terminal.rs b/codex-rs/tui/src/custom_terminal.rs
+index 556992b..4cbee6b 100644
 --- a/codex-rs/tui/src/custom_terminal.rs
 +++ b/codex-rs/tui/src/custom_terminal.rs
-@@ -183,6 +183,9 @@
+@@ -183,6 +183,9 @@ where
      /// Creates a new [`Terminal`] with the given [`Backend`] and [`TerminalOptions`].
      pub fn with_options(mut backend: B) -> io::Result<Self> {
          let screen_size = backend.size()?;
@@ -115,9 +126,11 @@ Why it is needed:
          let cursor_pos = backend.get_cursor_position().unwrap_or_else(|err| {
              // Some PTYs do not answer CPR (`ESC[6n`); continue with a safe default instead
              // of failing TUI startup.
+diff --git a/codex-rs/tui/src/history_cell.rs b/codex-rs/tui/src/history_cell.rs
+index b6806f8..606e571 100644
 --- a/codex-rs/tui/src/history_cell.rs
 +++ b/codex-rs/tui/src/history_cell.rs
-@@ -34,6 +34,7 @@
+@@ -34,6 +34,7 @@ use crate::test_support::PathBufExt;
  #[cfg(test)]
  use crate::test_support::test_path_buf;
  use crate::text_formatting::format_and_truncate_tool_result;
@@ -125,7 +138,7 @@ Why it is needed:
  use crate::text_formatting::truncate_text;
  use crate::tooltips;
  use crate::ui_consts::LIVE_PREFIX_COLS;
-@@ -378,7 +379,7 @@
+@@ -377,7 +378,7 @@ impl HistoryCell for UserHistoryCell {
          if let Some(wrapped_message) = wrapped_message {
              lines.extend(prefix_lines(
                  wrapped_message,
@@ -134,7 +147,7 @@ Why it is needed:
                  "  ".into(),
              ));
          }
-@@ -622,7 +623,7 @@
+@@ -621,7 +622,7 @@ impl HistoryCell for UnifiedExecInteractionCell {
          if let Some(command) = &self.command_display
              && !command.is_empty()
          {
@@ -143,7 +156,7 @@ Why it is needed:
              header_spans.push(command.clone().dim());
          }
          let header = Line::from(header_spans);
-@@ -1051,6 +1052,22 @@
+@@ -1050,6 +1051,22 @@ impl HistoryCell for CompletedMcpToolCallWithImageOutput {
  
  pub(crate) const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56; // Just an eyeballed value
  
@@ -166,7 +179,7 @@ Why it is needed:
  pub(crate) fn card_inner_width(width: u16, max_inner_width: usize) -> Option<usize> {
      if width < 4 {
          return None;
-@@ -1095,7 +1112,12 @@
+@@ -1094,7 +1111,12 @@ fn with_border_internal(
  
      let mut out = Vec::with_capacity(lines.len() + 2);
      let border_inner_width = content_width + 2;
@@ -180,7 +193,7 @@ Why it is needed:
  
      for line in lines.into_iter() {
          let used_width: usize = line
-@@ -1104,16 +1126,16 @@
+@@ -1103,16 +1125,16 @@ fn with_border_internal(
              .sum();
          let span_count = line.spans.len();
          let mut spans: Vec<Span<'static>> = Vec::with_capacity(span_count + 4);
@@ -200,9 +213,11 @@ Why it is needed:
  
      out
  }
+diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
+index ee50d0a..4256e13 100644
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
-@@ -1049,7 +1049,16 @@
+@@ -1044,7 +1044,16 @@ async fn run_ratatui_app(
          prev_hook(info);
      }));
      let mut terminal = tui::init()?;
@@ -220,9 +235,11 @@ Why it is needed:
  
      let mut tui = Tui::new(terminal);
      let mut terminal_restore_guard = TerminalRestoreGuard::new();
+diff --git a/codex-rs/tui/src/onboarding/onboarding_screen.rs b/codex-rs/tui/src/onboarding/onboarding_screen.rs
+index 0c7ebda..a0f518c 100644
 --- a/codex-rs/tui/src/onboarding/onboarding_screen.rs
 +++ b/codex-rs/tui/src/onboarding/onboarding_screen.rs
-@@ -477,9 +477,15 @@
+@@ -476,9 +476,15 @@ pub(crate) async fn run_onboarding_app(
                      match event {
                          TuiEvent::Key(key_event) => {
                              onboarding_screen.handle_key_event(key_event);
@@ -238,9 +255,11 @@ Why it is needed:
                          }
                          TuiEvent::Draw => {
                              if !did_full_clear_after_success
+diff --git a/codex-rs/tui/src/status_indicator_widget.rs b/codex-rs/tui/src/status_indicator_widget.rs
+index 471c0b4..4c86162 100644
 --- a/codex-rs/tui/src/status_indicator_widget.rs
 +++ b/codex-rs/tui/src/status_indicator_widget.rs
-@@ -24,6 +24,7 @@
+@@ -24,6 +24,7 @@ use crate::key_hint;
  use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
  use crate::render::renderable::Renderable;
  use crate::shimmer::shimmer_spans;
@@ -248,7 +267,7 @@ Why it is needed:
  use crate::text_formatting::capitalize_first;
  use crate::tui::FrameRequester;
  use crate::wrapping::RtOptions;
-@@ -267,7 +268,7 @@
+@@ -267,7 +268,7 @@ impl Renderable for StatusIndicatorWidget {
          if let Some(message) = &self.inline_message {
              // Keep optional context after elapsed/interrupt text so that core
              // interrupt affordances stay in a fixed visual location.
@@ -257,6 +276,8 @@ Why it is needed:
              spans.push(message.clone().dim());
          }
  
+diff --git a/codex-rs/tui/src/terminal_palette.rs b/codex-rs/tui/src/terminal_palette.rs
+index 83f9f82..02eebea 100644
 --- a/codex-rs/tui/src/terminal_palette.rs
 +++ b/codex-rs/tui/src/terminal_palette.rs
 @@ -1,5 +1,22 @@
@@ -282,7 +303,7 @@ Why it is needed:
  
  #[derive(Clone, Copy, Debug, Eq, PartialEq)]
  pub enum StdoutColorLevel {
-@@ -68,7 +85,7 @@
+@@ -68,7 +85,7 @@ pub fn default_bg() -> Option<(u8, u8, u8)> {
      default_colors().map(|c| c.bg)
  }
  
@@ -291,12 +312,10 @@ Why it is needed:
  mod imp {
      use super::DefaultColors;
      use crossterm::style::Color as CrosstermColor;
-@@ -140,6 +157,17 @@
-             _ => None,
-         }
+@@ -142,6 +159,17 @@ mod imp {
      }
-+}
-+
+ }
+ 
 +#[cfg(all(unix, not(test), target_os = "solaris"))]
 +mod imp {
 +    use super::DefaultColors;
@@ -306,12 +325,16 @@ Why it is needed:
 +    }
 +
 +    pub(super) fn requery_default_colors() {}
- }
- 
++}
++
  #[cfg(not(all(unix, not(test))))]
+ mod imp {
+     use super::DefaultColors;
+diff --git a/codex-rs/tui/src/tui/event_stream.rs b/codex-rs/tui/src/tui/event_stream.rs
+index 2ce0aa7..1253153 100644
 --- a/codex-rs/tui/src/tui/event_stream.rs
 +++ b/codex-rs/tui/src/tui/event_stream.rs
-@@ -24,9 +24,18 @@
+@@ -24,9 +24,18 @@ use std::sync::atomic::AtomicBool;
  use std::sync::atomic::Ordering;
  use std::task::Context;
  use std::task::Poll;
@@ -330,7 +353,7 @@ Why it is needed:
  use tokio::sync::watch;
  use tokio_stream::Stream;
  use tokio_stream::wrappers::BroadcastStream;
-@@ -115,17 +124,232 @@
+@@ -115,20 +124,235 @@ impl<S: EventSource + Default> EventBroker<S> {
  }
  
  /// Real crossterm-backed event source.
@@ -348,9 +371,9 @@ Why it is needed:
  impl EventSource for CrosstermEventSource {
      fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
          Pin::new(&mut self.get_mut().0).poll_next(cx)
-+    }
-+}
-+
+     }
+ }
+ 
 +#[cfg(target_os = "solaris")]
 +pub struct CrosstermEventSource {
 +    rx: mpsc::UnboundedReceiver<EventResult>,
@@ -560,10 +583,13 @@ Why it is needed:
 +impl EventSource for CrosstermEventSource {
 +    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
 +        self.get_mut().rx.poll_recv(cx)
-     }
- }
- 
-@@ -199,9 +423,17 @@
++    }
++}
++
+ /// TuiEventStream is a struct for reading TUI events (draws and user input).
+ /// Each instance has its own draw subscription (the draw channel is broadcast, so
+ /// multiple receivers are fine), while crossterm input is funneled through a
+@@ -199,9 +423,17 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
                  };
                  match Pin::new(events).poll_next(cx) {
                      Poll::Ready(Some(Ok(event))) => Some(event),
@@ -571,19 +597,19 @@ Why it is needed:
 +                    Poll::Ready(Some(Err(err))) => {
 +                        #[cfg(target_os = "solaris")]
 +                        tracing::warn!(error = %err, "resetting tui event source after read error");
-                         *state = EventBrokerState::Start;
--                        return Poll::Ready(None);
++                        *state = EventBrokerState::Start;
 +                        continue;
 +                    }
 +                    Poll::Ready(None) => {
 +                        #[cfg(target_os = "solaris")]
 +                        tracing::warn!("resetting tui event source after unexpected EOF");
-+                        *state = EventBrokerState::Start;
+                         *state = EventBrokerState::Start;
+-                        return Poll::Ready(None);
 +                        continue;
                      }
                      Poll::Pending => {
                          drop(state);
-@@ -237,6 +469,12 @@
+@@ -237,6 +469,12 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
      fn map_crossterm_event(&mut self, event: Event) -> Option<TuiEvent> {
          match event {
              Event::Key(key_event) => {
@@ -596,9 +622,11 @@ Why it is needed:
                  #[cfg(unix)]
                  if crate::tui::job_control::SUSPEND_KEY.is_press(key_event) {
                      let _ = self.suspend_context.suspend(&self.alt_screen_active);
+diff --git a/codex-rs/tui/src/tui.rs b/codex-rs/tui/src/tui.rs
+index 291a8ca..1676a64 100644
 --- a/codex-rs/tui/src/tui.rs
 +++ b/codex-rs/tui/src/tui.rs
-@@ -33,7 +33,9 @@
+@@ -33,7 +33,9 @@ use ratatui::crossterm::terminal::enable_raw_mode;
  use ratatui::layout::Offset;
  use ratatui::layout::Rect;
  use ratatui::layout::Size;
@@ -608,7 +636,7 @@ Why it is needed:
  use tokio::sync::broadcast;
  use tokio_stream::Stream;
  
-@@ -99,25 +101,30 @@
+@@ -268,27 +270,32 @@ mod tests {
  }
  
  pub fn set_modes() -> Result<()> {
@@ -621,16 +649,15 @@ Why it is needed:
 -    // Some terminals (notably legacy Windows consoles) do not support
 -    // keyboard enhancement flags. Attempt to enable them, but continue
 -    // gracefully if unsupported.
--    let _ = execute!(
--        stdout(),
--        PushKeyboardEnhancementFlags(
--            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
--                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
--                | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
--        )
--    );
--
--    let _ = execute!(stdout(), EnableFocusChange);
+-    if !keyboard_enhancement_disabled() {
+-        let _ = execute!(
+-            stdout(),
+-            PushKeyboardEnhancementFlags(
+-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+-                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+-                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+-            )
+-        );
 +
 +    #[cfg(not(target_os = "solaris"))]
 +    {
@@ -642,22 +669,25 @@ Why it is needed:
 +        // Some terminals (notably legacy Windows consoles) do not support
 +        // keyboard enhancement flags. Attempt to enable them, but continue
 +        // gracefully if unsupported.
-+        let _ = execute!(
-+            stdout(),
-+            PushKeyboardEnhancementFlags(
-+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-+            )
-+        );
++        if !keyboard_enhancement_disabled() {
++            let _ = execute!(
++                stdout(),
++                PushKeyboardEnhancementFlags(
++                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
++                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
++                        | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
++                )
++            );
++        }
 +
 +        let _ = execute!(stdout(), EnableFocusChange);
-+    }
-+
+     }
+ 
+-    let _ = execute!(stdout(), EnableFocusChange);
      Ok(())
  }
  
-@@ -164,10 +171,13 @@
+@@ -335,10 +342,13 @@ impl Command for DisableAlternateScroll {
  }
  
  fn restore_common(should_disable_raw_mode: bool) -> Result<()> {
@@ -675,20 +705,20 @@ Why it is needed:
      if should_disable_raw_mode {
          disable_raw_mode()?;
      }
-@@ -304,7 +314,11 @@
+@@ -475,7 +485,11 @@ impl Tui {
          let frame_requester = FrameRequester::new(draw_tx.clone());
  
          // Detect keyboard enhancement support before any EventStream is created so the
 -        // crossterm poller can acquire its lock without contention.
-+        // crossterm poller can acquire its lock without contention. Solaris terminals are
-+        // kept on the simpler input path for compatibility.
++        // crossterm poller can acquire its lock without contention. Solaris stays on the
++        // simpler input path for compatibility with older PTYs.
 +        #[cfg(target_os = "solaris")]
 +        let enhanced_keys_supported = false;
 +        #[cfg(not(target_os = "solaris"))]
-         let enhanced_keys_supported = supports_keyboard_enhancement().unwrap_or(false);
+         let enhanced_keys_supported =
+             !keyboard_enhancement_disabled() && supports_keyboard_enhancement().unwrap_or(false);
          // Cache this to avoid contention with the event reader.
-         supports_color::on_cached(supports_color::Stream::Stdout);
-@@ -313,6 +327,10 @@
+@@ -485,6 +499,10 @@ impl Tui {
              codex_terminal_detection::terminal_info().multiplexer,
              Some(codex_terminal_detection::Multiplexer::Zellij {})
          );
@@ -699,7 +729,7 @@ Why it is needed:
  
          Self {
              frame_requester,
-@@ -329,7 +347,7 @@
+@@ -501,7 +519,7 @@ impl Tui {
              notification_backend: Some(detect_backend(NotificationMethod::default())),
              notification_condition: NotificationCondition::default(),
              is_zellij,
@@ -708,7 +738,7 @@ Why it is needed:
          }
      }
  
-@@ -594,7 +612,7 @@
+@@ -766,7 +784,7 @@ impl Tui {
          // the synchronized update, to avoid racing with the event reader.
          let mut pending_viewport_area = self.pending_viewport_area()?;
  
@@ -717,7 +747,7 @@ Why it is needed:
              #[cfg(unix)]
              if let Some(prepared) = prepared_resume.take() {
                  prepared.apply(&mut self.terminal)?;
-@@ -606,16 +624,26 @@
+@@ -778,16 +796,26 @@ impl Tui {
                  terminal.clear()?;
              }
  
@@ -754,7 +784,7 @@ Why it is needed:
              }
  
              // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
-@@ -633,12 +661,24 @@
+@@ -805,12 +833,24 @@ impl Tui {
              }
  
              terminal.draw(|frame| {
