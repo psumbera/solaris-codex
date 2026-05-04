@@ -11,7 +11,7 @@ Why it is needed:
   variables and does not disable core dumps at startup
 
 diff --git a/codex-rs/process-hardening/src/lib.rs b/codex-rs/process-hardening/src/lib.rs
-index 1c206aae8751ac84baea5ebf4f677caa631950f2..f770fe722af3792a05b26bd096f33711d3ca30f0 100644
+index f9695fc..a8c0780 100644
 --- a/codex-rs/process-hardening/src/lib.rs
 +++ b/codex-rs/process-hardening/src/lib.rs
 @@ -17,8 +17,8 @@ pub fn pre_main_hardening() {
@@ -35,8 +35,8 @@ index 1c206aae8751ac84baea5ebf4f677caa631950f2..f770fe722af3792a05b26bd096f33711
  ))]
  const SET_RLIMIT_CORE_FAILED_EXIT_CODE: i32 = 7;
  
-@@ -61,9 +62,9 @@ pub(crate) fn pre_main_hardening_linux() {
-     remove_env_vars_with_prefix(b"LD_");
+@@ -72,9 +73,9 @@ pub fn disable_process_dumping() -> std::io::Result<()> {
+     }
  }
  
 -#[cfg(any(target_os = "freebsd", target_os = "openbsd"))]

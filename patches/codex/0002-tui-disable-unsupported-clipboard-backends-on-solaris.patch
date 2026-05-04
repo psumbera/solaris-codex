@@ -11,10 +11,10 @@ Why it is needed:
   at runtime when clipboard actions are attempted on Solaris
 
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index 29d6d0c3934df9e7a215f2e8b0ec26b227c02bdc..f34a202b34412b3c8251da1aa28c063c0e6e189b 100644
+index 300449a..a73a5c1 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
-@@ -133,9 +133,9 @@ windows-sys = { version = "0.52", features = [
+@@ -134,9 +134,9 @@ windows-sys = { version = "0.52", features = [
  ] }
  winsplit = "0.1"
  
@@ -28,7 +28,7 @@ index 29d6d0c3934df9e7a215f2e8b0ec26b227c02bdc..f34a202b34412b3c8251da1aa28c063c
  
  
 diff --git a/codex-rs/tui/src/clipboard_copy.rs b/codex-rs/tui/src/clipboard_copy.rs
-index 038dc0b285f25b78df6a97edab5a398fa3d59aef..dc4e8bf1086bd10779a04d1e057f588b5ed4b7fe 100644
+index 038dc0b..dc4e8bf 100644
 --- a/codex-rs/tui/src/clipboard_copy.rs
 +++ b/codex-rs/tui/src/clipboard_copy.rs
 @@ -146,7 +146,7 @@ fn is_wsl_session() -> bool {
@@ -53,7 +53,7 @@ index 038dc0b285f25b78df6a97edab5a398fa3d59aef..dc4e8bf1086bd10779a04d1e057f588b
  #[cfg(target_os = "linux")]
  fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
 diff --git a/codex-rs/tui/src/clipboard_paste.rs b/codex-rs/tui/src/clipboard_paste.rs
-index 4d28b365fed84a6345f8d192658362ba37ab99b2..a2473bf6f316bf8ff5563d70a9c6aa366d540113 100644
+index 4d28b36..a2473bf 100644
 --- a/codex-rs/tui/src/clipboard_paste.rs
 +++ b/codex-rs/tui/src/clipboard_paste.rs
 @@ -1,5 +1,6 @@

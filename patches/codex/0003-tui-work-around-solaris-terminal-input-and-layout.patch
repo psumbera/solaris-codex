@@ -12,10 +12,10 @@ Why it is needed:
   poorly in terminals commonly used on Solaris systems
 
 diff --git a/codex-rs/tui/src/bottom_pane/chat_composer.rs b/codex-rs/tui/src/bottom_pane/chat_composer.rs
-index a529d16..32e0ba9 100644
+index c879743..3ec699a 100644
 --- a/codex-rs/tui/src/bottom_pane/chat_composer.rs
 +++ b/codex-rs/tui/src/bottom_pane/chat_composer.rs
-@@ -186,6 +186,7 @@ use crate::bottom_pane::prompt_args::parse_slash_name;
+@@ -193,6 +193,7 @@ use crate::keymap::primary_binding;
  use crate::render::Insets;
  use crate::render::RectExt;
  use crate::render::renderable::Renderable;
@@ -23,7 +23,7 @@ index a529d16..32e0ba9 100644
  use crate::slash_command::SlashCommand;
  use crate::style::user_message_style;
  use codex_protocol::models::local_image_label_text;
-@@ -4148,11 +4149,15 @@ impl ChatComposer {
+@@ -4341,11 +4342,15 @@ impl ChatComposer {
                      }
                  } else if is_zellij {
                      Span::styled("›", style.fg(ratatui::style::Color::Cyan))
@@ -40,7 +40,7 @@ index a529d16..32e0ba9 100644
                  "›".dim()
              };
 diff --git a/codex-rs/tui/src/bottom_pane/footer.rs b/codex-rs/tui/src/bottom_pane/footer.rs
-index 4c8b181..4738076 100644
+index c17f8fb..edb2c5d 100644
 --- a/codex-rs/tui/src/bottom_pane/footer.rs
 +++ b/codex-rs/tui/src/bottom_pane/footer.rs
 @@ -45,6 +45,7 @@ use crate::key_hint;
@@ -51,8 +51,8 @@ index 4c8b181..4738076 100644
  use crate::ui_consts::FOOTER_INDENT_COLS;
  use crossterm::event::KeyCode;
  use ratatui::buffer::Buffer;
-@@ -296,7 +297,7 @@ fn left_side_line(
- 
+@@ -342,7 +343,7 @@ fn left_side_line(
+
      if let Some(collaboration_mode_indicator) = collaboration_mode_indicator {
          if !matches!(state.hint, SummaryHintKind::None) {
 -            line.push_span(" · ".dim());
@@ -60,8 +60,8 @@ index 4c8b181..4738076 100644
          }
          line.push_span(collaboration_mode_indicator.styled_span(state.show_cycle_hint));
      }
-@@ -662,7 +663,7 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
- 
+@@ -757,7 +758,7 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
+
      if let Some(active_agent_label) = props.active_agent_label.as_ref() {
          if let Some(existing) = line.as_mut() {
 -            existing.spans.push(" · ".into());
@@ -74,9 +74,9 @@ index 93fca82..64d48a1 100644
 --- a/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
 +++ b/codex-rs/tui/src/bottom_pane/status_surface_preview.rs
 @@ -2,6 +2,8 @@ use std::collections::BTreeMap;
- 
+
  use ratatui::text::Line;
- 
+
 +use crate::terminal_palette::use_ascii_ui;
 +
  #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -92,18 +92,18 @@ index 93fca82..64d48a1 100644
              None
          } else {
 diff --git a/codex-rs/tui/src/chatwidget/status_surfaces.rs b/codex-rs/tui/src/chatwidget/status_surfaces.rs
-index 94ed216..6ec201e 100644
+index 6b590d7..161074f 100644
 --- a/codex-rs/tui/src/chatwidget/status_surfaces.rs
 +++ b/codex-rs/tui/src/chatwidget/status_surfaces.rs
-@@ -4,6 +4,7 @@
- //! behavior easier to review without paging through the rest of `chatwidget.rs`.
- 
+@@ -5,6 +5,7 @@
+
  use super::*;
+ use crate::status::format_tokens_compact;
 +use crate::terminal_palette::use_ascii_ui;
- 
+
  /// Items shown in the terminal title when the user has not configured a
- /// custom selection. Intentionally minimal: spinner + project name.
-@@ -152,7 +153,7 @@ impl ChatWidget {
+ /// custom selection. Intentionally minimal: activity indicator + project name.
+@@ -160,7 +161,7 @@ impl ChatWidget {
          let line = if parts.is_empty() {
              None
          } else {
@@ -113,7 +113,7 @@ index 94ed216..6ec201e 100644
          self.set_status_line(line);
      }
 diff --git a/codex-rs/tui/src/custom_terminal.rs b/codex-rs/tui/src/custom_terminal.rs
-index 556992b..4cbee6b 100644
+index cadf1fa..a50c776 100644
 --- a/codex-rs/tui/src/custom_terminal.rs
 +++ b/codex-rs/tui/src/custom_terminal.rs
 @@ -183,6 +183,9 @@ where
@@ -127,7 +127,7 @@ index 556992b..4cbee6b 100644
              // Some PTYs do not answer CPR (`ESC[6n`); continue with a safe default instead
              // of failing TUI startup.
 diff --git a/codex-rs/tui/src/history_cell.rs b/codex-rs/tui/src/history_cell.rs
-index b6806f8..606e571 100644
+index 803cfcd..7c315cd 100644
 --- a/codex-rs/tui/src/history_cell.rs
 +++ b/codex-rs/tui/src/history_cell.rs
 @@ -34,6 +34,7 @@ use crate::test_support::PathBufExt;
@@ -138,7 +138,7 @@ index b6806f8..606e571 100644
  use crate::text_formatting::truncate_text;
  use crate::tooltips;
  use crate::ui_consts::LIVE_PREFIX_COLS;
-@@ -377,7 +378,7 @@ impl HistoryCell for UserHistoryCell {
+@@ -379,7 +380,7 @@ impl HistoryCell for UserHistoryCell {
          if let Some(wrapped_message) = wrapped_message {
              lines.extend(prefix_lines(
                  wrapped_message,
@@ -147,7 +147,7 @@ index b6806f8..606e571 100644
                  "  ".into(),
              ));
          }
-@@ -621,7 +622,7 @@ impl HistoryCell for UnifiedExecInteractionCell {
+@@ -674,7 +675,7 @@ impl HistoryCell for UnifiedExecInteractionCell {
          if let Some(command) = &self.command_display
              && !command.is_empty()
          {
@@ -156,10 +156,10 @@ index b6806f8..606e571 100644
              header_spans.push(command.clone().dim());
          }
          let header = Line::from(header_spans);
-@@ -1050,6 +1051,22 @@ impl HistoryCell for CompletedMcpToolCallWithImageOutput {
- 
+@@ -1103,6 +1104,22 @@ impl HistoryCell for CompletedMcpToolCallWithImageOutput {
+
  pub(crate) const SESSION_HEADER_MAX_INNER_WIDTH: usize = 56; // Just an eyeballed value
- 
+
 +fn ui_separator() -> &'static str {
 +    if use_ascii_ui() {
 +        " | "
@@ -179,8 +179,8 @@ index b6806f8..606e571 100644
  pub(crate) fn card_inner_width(width: u16, max_inner_width: usize) -> Option<usize> {
      if width < 4 {
          return None;
-@@ -1094,7 +1111,12 @@ fn with_border_internal(
- 
+@@ -1147,7 +1164,12 @@ fn with_border_internal(
+
      let mut out = Vec::with_capacity(lines.len() + 2);
      let border_inner_width = content_width + 2;
 -    out.push(vec![format!("╭{}╮", "─".repeat(border_inner_width)).dim()].into());
@@ -190,10 +190,10 @@ index b6806f8..606e571 100644
 +        ("╭", "╮", "╰", "╯", "─", "│")
 +    };
 +    out.push(vec![format!("{top_left}{}{top_right}", horizontal.repeat(border_inner_width)).dim()].into());
- 
+
      for line in lines.into_iter() {
          let used_width: usize = line
-@@ -1103,16 +1125,16 @@ fn with_border_internal(
+@@ -1156,16 +1178,16 @@ fn with_border_internal(
              .sum();
          let span_count = line.spans.len();
          let mut spans: Vec<Span<'static>> = Vec::with_capacity(span_count + 4);
@@ -207,17 +207,17 @@ index b6806f8..606e571 100644
 +        spans.push(Span::from(format!(" {vertical}")).dim());
          out.push(Line::from(spans));
      }
- 
+
 -    out.push(vec![format!("╰{}╯", "─".repeat(border_inner_width)).dim()].into());
 +    out.push(vec![format!("{bottom_left}{}{bottom_right}", horizontal.repeat(border_inner_width)).dim()].into());
- 
+
      out
  }
 diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
-index ee50d0a..4256e13 100644
+index 39b4294..ab48189 100644
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
-@@ -1044,7 +1044,16 @@ async fn run_ratatui_app(
+@@ -1062,7 +1062,16 @@ async fn run_ratatui_app(
          prev_hook(info);
      }));
      let mut terminal = tui::init()?;
@@ -232,14 +232,14 @@ index ee50d0a..4256e13 100644
 +    } else {
 +        terminal.clear()?;
 +    }
- 
+
      let mut tui = Tui::new(terminal);
      let mut terminal_restore_guard = TerminalRestoreGuard::new();
 diff --git a/codex-rs/tui/src/onboarding/onboarding_screen.rs b/codex-rs/tui/src/onboarding/onboarding_screen.rs
-index 0c7ebda..a0f518c 100644
+index 6edb6a6..086399e 100644
 --- a/codex-rs/tui/src/onboarding/onboarding_screen.rs
 +++ b/codex-rs/tui/src/onboarding/onboarding_screen.rs
-@@ -476,9 +476,15 @@ pub(crate) async fn run_onboarding_app(
+@@ -511,9 +511,15 @@ pub(crate) async fn run_onboarding_app(
                      match event {
                          TuiEvent::Key(key_event) => {
                              onboarding_screen.handle_key_event(key_event);
@@ -253,7 +253,7 @@ index 0c7ebda..a0f518c 100644
 +                                frame.render_widget_ref(&onboarding_screen, frame.area());
 +                            });
                          }
-                         TuiEvent::Draw => {
+                         TuiEvent::Draw | TuiEvent::Resize => {
                              if !did_full_clear_after_success
 diff --git a/codex-rs/tui/src/status_indicator_widget.rs b/codex-rs/tui/src/status_indicator_widget.rs
 index 471c0b4..4c86162 100644
@@ -275,7 +275,7 @@ index 471c0b4..4c86162 100644
 +            spans.push((if use_ascii_ui() { " | " } else { " · " }).dim());
              spans.push(message.clone().dim());
          }
- 
+
 diff --git a/codex-rs/tui/src/terminal_palette.rs b/codex-rs/tui/src/terminal_palette.rs
 index 83f9f82..02eebea 100644
 --- a/codex-rs/tui/src/terminal_palette.rs
@@ -300,13 +300,13 @@ index 83f9f82..02eebea 100644
 +    in_screen && !lang.to_ascii_uppercase().contains("UTF-8")
 +}
 +
- 
+
  #[derive(Clone, Copy, Debug, Eq, PartialEq)]
  pub enum StdoutColorLevel {
 @@ -68,7 +85,7 @@ pub fn default_bg() -> Option<(u8, u8, u8)> {
      default_colors().map(|c| c.bg)
  }
- 
+
 -#[cfg(all(unix, not(test)))]
 +#[cfg(all(unix, not(test), not(target_os = "solaris")))]
  mod imp {
@@ -315,7 +315,7 @@ index 83f9f82..02eebea 100644
 @@ -142,6 +159,17 @@ mod imp {
      }
  }
- 
+
 +#[cfg(all(unix, not(test), target_os = "solaris"))]
 +mod imp {
 +    use super::DefaultColors;
@@ -330,8 +330,211 @@ index 83f9f82..02eebea 100644
  #[cfg(not(all(unix, not(test))))]
  mod imp {
      use super::DefaultColors;
+diff --git a/codex-rs/tui/src/tui.rs b/codex-rs/tui/src/tui.rs
+index 30af780..e546536 100644
+--- a/codex-rs/tui/src/tui.rs
++++ b/codex-rs/tui/src/tui.rs
+@@ -14,13 +14,18 @@ use std::time::Duration;
+
+ use crossterm::Command;
+ use crossterm::SynchronizedUpdate;
++#[cfg(not(target_os = "solaris"))]
+ use crossterm::event::DisableBracketedPaste;
++#[cfg(not(target_os = "solaris"))]
+ use crossterm::event::DisableFocusChange;
++#[cfg(not(target_os = "solaris"))]
+ use crossterm::event::EnableBracketedPaste;
++#[cfg(not(target_os = "solaris"))]
+ use crossterm::event::EnableFocusChange;
+ use crossterm::event::KeyEvent;
+ use crossterm::terminal::EnterAlternateScreen;
+ use crossterm::terminal::LeaveAlternateScreen;
++#[cfg(not(target_os = "solaris"))]
+ use crossterm::terminal::supports_keyboard_enhancement;
+ use ratatui::backend::Backend;
+ use ratatui::backend::CrosstermBackend;
+@@ -31,7 +36,9 @@ use ratatui::layout::Offset;
+ use ratatui::layout::Position;
+ use ratatui::layout::Rect;
+ use ratatui::layout::Size;
++use ratatui::prelude::Widget;
+ use ratatui::text::Line;
++use ratatui::widgets::Clear;
+ use tokio::sync::broadcast;
+ use tokio_stream::Stream;
+
+@@ -102,18 +109,23 @@ mod tests {
+ }
+
+ pub fn set_modes() -> Result<()> {
+-    execute!(stdout(), EnableBracketedPaste)?;
+-
+     enable_raw_mode()?;
+-    // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
+-    // chat_composer.rs is using a keyboard event listener to enter for any modified keys
+-    // to create a new line that require this.
+-    // Some terminals (notably legacy Windows consoles) do not support
+-    // keyboard enhancement flags. Attempt to enable them, but continue
+-    // gracefully if unsupported.
+-    keyboard_modes::enable_keyboard_enhancement();
+-
+-    let _ = execute!(stdout(), EnableFocusChange);
++
++    #[cfg(not(target_os = "solaris"))]
++    {
++        execute!(stdout(), EnableBracketedPaste)?;
++
++        // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
++        // chat_composer.rs is using a keyboard event listener to enter for any modified keys
++        // to create a new line that require this.
++        // Some terminals (notably legacy Windows consoles) do not support
++        // keyboard enhancement flags. Attempt to enable them, but continue
++        // gracefully if unsupported.
++        keyboard_modes::enable_keyboard_enhancement();
++
++        let _ = execute!(stdout(), EnableFocusChange);
++    }
++
+     Ok(())
+ }
+
+@@ -175,12 +187,21 @@ fn restore_common(
+     raw_mode_restore: RawModeRestore,
+     keyboard_restore: KeyboardRestore,
+ ) -> Result<()> {
++    #[cfg(target_os = "solaris")]
++    let _ = keyboard_restore;
++
++    #[cfg(not(target_os = "solaris"))]
+     match keyboard_restore {
+         KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(),
+         KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
+     }
+
++    #[cfg(target_os = "solaris")]
++    let mut first_error = None;
++    #[cfg(not(target_os = "solaris"))]
+     let mut first_error = execute!(stdout(), DisableBracketedPaste).err();
++
++    #[cfg(not(target_os = "solaris"))]
+     let _ = execute!(stdout(), DisableFocusChange);
+     if matches!(raw_mode_restore, RawModeRestore::Disable)
+         && let Err(err) = disable_raw_mode()
+@@ -337,7 +358,11 @@ impl Tui {
+         let frame_requester = FrameRequester::new(draw_tx.clone());
+
+         // Detect keyboard enhancement support before any EventStream is created so the
+-        // crossterm poller can acquire its lock without contention.
++        // crossterm poller can acquire its lock without contention. Solaris stays on the
++        // simpler input path for compatibility with older PTYs.
++        #[cfg(target_os = "solaris")]
++        let enhanced_keys_supported = false;
++        #[cfg(not(target_os = "solaris"))]
+         let enhanced_keys_supported = !keyboard_modes::keyboard_enhancement_disabled()
+             && supports_keyboard_enhancement().unwrap_or(false);
+         // Cache this to avoid contention with the event reader.
+@@ -347,6 +372,10 @@ impl Tui {
+             codex_terminal_detection::terminal_info().multiplexer,
+             Some(codex_terminal_detection::Multiplexer::Zellij {})
+         );
++        let in_screen = std::env::var_os("STY").is_some()
++            || std::env::var("TERM")
++                .ok()
++                .is_some_and(|term| term.starts_with("screen"));
+
+         Self {
+             frame_requester,
+@@ -363,7 +392,7 @@ impl Tui {
+             notification_backend: Some(detect_backend(NotificationMethod::default())),
+             notification_condition: NotificationCondition::default(),
+             is_zellij,
+-            alt_screen_enabled: true,
++            alt_screen_enabled: !cfg!(target_os = "solaris") && !in_screen,
+         }
+     }
+
+@@ -676,7 +705,7 @@ impl Tui {
+         // the synchronized update, to avoid racing with the event reader.
+         let mut pending_viewport_area = self.pending_viewport_area()?;
+
+-        stdout().sync_update(|_| {
++        let mut render_once = || -> Result<()> {
+             #[cfg(unix)]
+             if let Some(prepared) = prepared_resume.take() {
+                 prepared.apply(&mut self.terminal)?;
+@@ -688,16 +717,26 @@ impl Tui {
+                 terminal.clear()?;
+             }
+
+-            let mut needs_full_repaint =
+-                Self::update_inline_viewport(terminal, height, self.is_zellij)?;
+-            needs_full_repaint |= Self::flush_pending_history_lines(
+-                terminal,
+-                &mut self.pending_history_lines,
+-                self.is_zellij,
+-            )?;
+-
+-            if needs_full_repaint {
+-                terminal.invalidate_viewport();
++            if self.alt_screen_enabled {
++                let mut needs_full_repaint =
++                    Self::update_inline_viewport(terminal, height, self.is_zellij)?;
++                needs_full_repaint |= Self::flush_pending_history_lines(
++                    terminal,
++                    &mut self.pending_history_lines,
++                    self.is_zellij,
++                )?;
++
++                if needs_full_repaint {
++                    terminal.invalidate_viewport();
++                }
++            } else {
++                let size = terminal.size()?;
++                let area = Rect::new(0, 0, size.width, height.min(size.height));
++                if area != terminal.viewport_area {
++                    terminal.set_viewport_area(area);
++                }
++                terminal.clear()?;
++                self.pending_history_lines.clear();
+             }
+
+             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
+@@ -717,7 +756,13 @@ impl Tui {
+             terminal.draw(|frame| {
+                 draw_fn(frame);
+             })
+-        })?
++        };
++
++        if self.alt_screen_enabled {
++            stdout().sync_update(|_| render_once())?
++        } else {
++            render_once()
++        }
+     }
+
+     /// Draw a frame using the resize-reflow viewport and history insertion rules.
+@@ -772,12 +817,18 @@ impl Tui {
+             }
+
+             terminal.draw(|frame| {
++                if !self.alt_screen_enabled {
++                    Clear.render(frame.area(), frame.buffer);
++                }
+                 draw_fn(frame);
+             })
+         })?
+     }
+
+     fn pending_viewport_area(&mut self) -> Result<Option<Rect>> {
++        if !self.alt_screen_enabled {
++            return Ok(None);
++        }
+         let terminal = &mut self.terminal;
+         let screen_size = terminal.size()?;
+         let last_known_screen_size = terminal.last_known_screen_size;
 diff --git a/codex-rs/tui/src/tui/event_stream.rs b/codex-rs/tui/src/tui/event_stream.rs
-index 2ce0aa7..1253153 100644
+index dcc6e17..64326d5 100644
 --- a/codex-rs/tui/src/tui/event_stream.rs
 +++ b/codex-rs/tui/src/tui/event_stream.rs
 @@ -24,9 +24,18 @@ use std::sync::atomic::AtomicBool;
@@ -339,7 +542,7 @@ index 2ce0aa7..1253153 100644
  use std::task::Context;
  use std::task::Poll;
 +use std::time::Duration;
- 
+
  use crossterm::event::Event;
 +#[cfg(target_os = "solaris")]
 +use crossterm::event::KeyCode;
@@ -355,25 +558,25 @@ index 2ce0aa7..1253153 100644
  use tokio_stream::wrappers::BroadcastStream;
 @@ -115,20 +124,235 @@ impl<S: EventSource + Default> EventBroker<S> {
  }
- 
+
  /// Real crossterm-backed event source.
 +#[cfg(not(target_os = "solaris"))]
  pub struct CrosstermEventSource(pub crossterm::event::EventStream);
- 
+
 +#[cfg(not(target_os = "solaris"))]
  impl Default for CrosstermEventSource {
      fn default() -> Self {
          Self(crossterm::event::EventStream::new())
      }
  }
- 
+
 +#[cfg(not(target_os = "solaris"))]
  impl EventSource for CrosstermEventSource {
      fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
          Pin::new(&mut self.get_mut().0).poll_next(cx)
      }
  }
- 
+
 +#[cfg(target_os = "solaris")]
 +pub struct CrosstermEventSource {
 +    rx: mpsc::UnboundedReceiver<EventResult>,
@@ -622,191 +825,3 @@ index 2ce0aa7..1253153 100644
                  #[cfg(unix)]
                  if crate::tui::job_control::SUSPEND_KEY.is_press(key_event) {
                      let _ = self.suspend_context.suspend(&self.alt_screen_active);
-diff --git a/codex-rs/tui/src/tui.rs b/codex-rs/tui/src/tui.rs
-index 291a8ca..1676a64 100644
---- a/codex-rs/tui/src/tui.rs
-+++ b/codex-rs/tui/src/tui.rs
-@@ -33,7 +33,9 @@ use ratatui::crossterm::terminal::enable_raw_mode;
- use ratatui::layout::Offset;
- use ratatui::layout::Rect;
- use ratatui::layout::Size;
-+use ratatui::prelude::Widget;
- use ratatui::text::Line;
-+use ratatui::widgets::Clear;
- use tokio::sync::broadcast;
- use tokio_stream::Stream;
- 
-@@ -268,27 +270,32 @@ mod tests {
- }
- 
- pub fn set_modes() -> Result<()> {
--    execute!(stdout(), EnableBracketedPaste)?;
--
-     enable_raw_mode()?;
--    // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
--    // chat_composer.rs is using a keyboard event listener to enter for any modified keys
--    // to create a new line that require this.
--    // Some terminals (notably legacy Windows consoles) do not support
--    // keyboard enhancement flags. Attempt to enable them, but continue
--    // gracefully if unsupported.
--    if !keyboard_enhancement_disabled() {
--        let _ = execute!(
--            stdout(),
--            PushKeyboardEnhancementFlags(
--                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
--                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
--                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
--            )
--        );
-+
-+    #[cfg(not(target_os = "solaris"))]
-+    {
-+        execute!(stdout(), EnableBracketedPaste)?;
-+
-+        // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
-+        // chat_composer.rs is using a keyboard event listener to enter for any modified keys
-+        // to create a new line that require this.
-+        // Some terminals (notably legacy Windows consoles) do not support
-+        // keyboard enhancement flags. Attempt to enable them, but continue
-+        // gracefully if unsupported.
-+        if !keyboard_enhancement_disabled() {
-+            let _ = execute!(
-+                stdout(),
-+                PushKeyboardEnhancementFlags(
-+                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-+                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-+                        | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-+                )
-+            );
-+        }
-+
-+        let _ = execute!(stdout(), EnableFocusChange);
-     }
- 
--    let _ = execute!(stdout(), EnableFocusChange);
-     Ok(())
- }
- 
-@@ -335,10 +342,13 @@ impl Command for DisableAlternateScroll {
- }
- 
- fn restore_common(should_disable_raw_mode: bool) -> Result<()> {
--    // Pop may fail on platforms that didn't support the push; ignore errors.
--    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
--    execute!(stdout(), DisableBracketedPaste)?;
--    let _ = execute!(stdout(), DisableFocusChange);
-+    #[cfg(not(target_os = "solaris"))]
-+    {
-+        // Pop may fail on platforms that didn't support the push; ignore errors.
-+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
-+        execute!(stdout(), DisableBracketedPaste)?;
-+        let _ = execute!(stdout(), DisableFocusChange);
-+    }
-     if should_disable_raw_mode {
-         disable_raw_mode()?;
-     }
-@@ -475,7 +485,11 @@ impl Tui {
-         let frame_requester = FrameRequester::new(draw_tx.clone());
- 
-         // Detect keyboard enhancement support before any EventStream is created so the
--        // crossterm poller can acquire its lock without contention.
-+        // crossterm poller can acquire its lock without contention. Solaris stays on the
-+        // simpler input path for compatibility with older PTYs.
-+        #[cfg(target_os = "solaris")]
-+        let enhanced_keys_supported = false;
-+        #[cfg(not(target_os = "solaris"))]
-         let enhanced_keys_supported =
-             !keyboard_enhancement_disabled() && supports_keyboard_enhancement().unwrap_or(false);
-         // Cache this to avoid contention with the event reader.
-@@ -485,6 +499,10 @@ impl Tui {
-             codex_terminal_detection::terminal_info().multiplexer,
-             Some(codex_terminal_detection::Multiplexer::Zellij {})
-         );
-+        let in_screen = std::env::var_os("STY").is_some()
-+            || std::env::var("TERM")
-+                .ok()
-+                .is_some_and(|term| term.starts_with("screen"));
- 
-         Self {
-             frame_requester,
-@@ -501,7 +519,7 @@ impl Tui {
-             notification_backend: Some(detect_backend(NotificationMethod::default())),
-             notification_condition: NotificationCondition::default(),
-             is_zellij,
--            alt_screen_enabled: true,
-+            alt_screen_enabled: !cfg!(target_os = "solaris") && !in_screen,
-         }
-     }
- 
-@@ -766,7 +784,7 @@ impl Tui {
-         // the synchronized update, to avoid racing with the event reader.
-         let mut pending_viewport_area = self.pending_viewport_area()?;
- 
--        stdout().sync_update(|_| {
-+        let mut render_once = || -> Result<()> {
-             #[cfg(unix)]
-             if let Some(prepared) = prepared_resume.take() {
-                 prepared.apply(&mut self.terminal)?;
-@@ -778,16 +796,26 @@ impl Tui {
-                 terminal.clear()?;
-             }
- 
--            let mut needs_full_repaint =
--                Self::update_inline_viewport(terminal, height, self.is_zellij)?;
--            needs_full_repaint |= Self::flush_pending_history_lines(
--                terminal,
--                &mut self.pending_history_lines,
--                self.is_zellij,
--            )?;
--
--            if needs_full_repaint {
--                terminal.invalidate_viewport();
-+            if self.alt_screen_enabled {
-+                let mut needs_full_repaint =
-+                    Self::update_inline_viewport(terminal, height, self.is_zellij)?;
-+                needs_full_repaint |= Self::flush_pending_history_lines(
-+                    terminal,
-+                    &mut self.pending_history_lines,
-+                    self.is_zellij,
-+                )?;
-+
-+                if needs_full_repaint {
-+                    terminal.invalidate_viewport();
-+                }
-+            } else {
-+                let size = terminal.size()?;
-+                let area = Rect::new(0, 0, size.width, height.min(size.height));
-+                if area != terminal.viewport_area {
-+                    terminal.set_viewport_area(area);
-+                }
-+                terminal.clear()?;
-+                self.pending_history_lines.clear();
-             }
- 
-             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
-@@ -805,12 +833,24 @@ impl Tui {
-             }
- 
-             terminal.draw(|frame| {
-+                if !self.alt_screen_enabled {
-+                    Clear.render(frame.area(), frame.buffer);
-+                }
-                 draw_fn(frame);
-             })
--        })?
-+        };
-+
-+        if self.alt_screen_enabled {
-+            stdout().sync_update(|_| render_once())?
-+        } else {
-+            render_once()
-+        }
-     }
- 
-     fn pending_viewport_area(&mut self) -> Result<Option<Rect>> {
-+        if !self.alt_screen_enabled {
-+            return Ok(None);
-+        }
-         let terminal = &mut self.terminal;
-         let screen_size = terminal.size()?;
-         let last_known_screen_size = terminal.last_known_screen_size;
