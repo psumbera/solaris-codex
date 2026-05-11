@@ -61,7 +61,7 @@ build/install/codex/bin/codex --version
 - The wrapper uses the official Solaris Rust standalone installer target
   `x86_64-pc-solaris`.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.128.0`, built from its `codex-rs/` workspace.
+  `rust-v0.130.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -83,6 +83,8 @@ patch series under `patches/codex/` before vendoring:
   unreliable default `crossterm::event::EventStream` path with a Solaris input
   reader, prefers an ASCII-safe presentation on older terminals, and redraws the
   onboarding flow so the actionable step stays visible on smaller PTYs.
+- `0004-config-host-name-use-solaris-ai-canonname-fallback.patch` supplies the
+  Solaris `AI_CANONNAME` value that the Rust `libc` crate does not expose.
 
 After `cargo vendor`, `build-codex.sh` still applies the remaining Solaris
 vendored-crate rewrites in place:
