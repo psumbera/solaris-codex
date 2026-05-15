@@ -85,6 +85,12 @@ patch series under `patches/codex/` before vendoring:
   onboarding flow so the actionable step stays visible on smaller PTYs.
 - `0004-config-host-name-use-solaris-ai-canonname-fallback.patch` supplies the
   Solaris `AI_CANONNAME` value that the Rust `libc` crate does not expose.
+- `0005-state-use-rollback-journal-on-solaris.patch` keeps Codex state
+  databases off SQLite WAL mode on Solaris, avoiding `-shm` mmap failures on
+  NFS-backed homes.
+- `0006-arg0-tolerate-solaris-stale-temp-cleanup.patch` keeps stale arg0 temp
+  cleanup best-effort when Solaris/NFS reports non-empty directory races during
+  startup.
 
 After `cargo vendor`, `build-codex.sh` still applies the remaining Solaris
 vendored-crate rewrites in place:

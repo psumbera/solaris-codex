@@ -1,0 +1,154 @@
+This patch is needed because Solaris home directories are often NFS-backed, and
+SQLite WAL mode can fail during startup when it tries to mmap the `-shm` sidecar.
+
+What it does:
+- uses rollback journal mode instead of WAL for Codex state databases on Solaris
+- removes stale Solaris WAL sidecars when the WAL file is empty or absent
+- uses an exclusive one-shot connection to convert existing WAL-marked databases
+  before opening the normal connection pool
+- keeps WAL mode unchanged on other targets
+
+Why it is needed:
+- without it, Codex can fail at startup on Solaris NFS homes with
+  `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
+
+diff --git a/codex-rs/state/src/runtime.rs b/codex-rs/state/src/runtime.rs
+index c8b4e7b..2d7e541 100644
+--- a/codex-rs/state/src/runtime.rs
++++ b/codex-rs/state/src/runtime.rs
+@@ -35,6 +35,8 @@ use codex_protocol::protocol::RolloutItem;
+ use log::LevelFilter;
+ use serde_json::Value;
+ use sqlx::ConnectOptions;
++#[cfg(target_os = "solaris")]
++use sqlx::Connection;
+ use sqlx::QueryBuilder;
+ use sqlx::Row;
+ use sqlx::Sqlite;
+@@ -44,9 +46,13 @@ use sqlx::migrate::Migrator;
+ use sqlx::sqlite::SqliteAutoVacuum;
+ use sqlx::sqlite::SqliteConnectOptions;
+ use sqlx::sqlite::SqliteJournalMode;
++#[cfg(target_os = "solaris")]
++use sqlx::sqlite::SqliteLockingMode;
+ use sqlx::sqlite::SqlitePoolOptions;
+ use sqlx::sqlite::SqliteSynchronous;
+ use std::collections::BTreeSet;
++#[cfg(target_os = "solaris")]
++use std::ffi::OsString;
+ use std::path::Path;
+ use std::path::PathBuf;
+ use std::sync::Arc;
+@@ -158,19 +164,101 @@ impl StateRuntime {
+ }
+ 
+ fn base_sqlite_options(path: &Path) -> SqliteConnectOptions {
++    #[cfg(target_os = "solaris")]
++    cleanup_solaris_wal_sidecars(path);
++
+     SqliteConnectOptions::new()
+         .filename(path)
+         .create_if_missing(true)
+-        .journal_mode(SqliteJournalMode::Wal)
++        .journal_mode(default_sqlite_journal_mode())
+         .synchronous(SqliteSynchronous::Normal)
+         .busy_timeout(Duration::from_secs(5))
+         .log_statements(LevelFilter::Off)
+ }
+ 
++fn default_sqlite_journal_mode() -> SqliteJournalMode {
++    if cfg!(target_os = "solaris") {
++        SqliteJournalMode::Delete
++    } else {
++        SqliteJournalMode::Wal
++    }
++}
++
++#[cfg(target_os = "solaris")]
++fn cleanup_solaris_wal_sidecars(path: &Path) {
++    // WAL mode relies on mmap'ing the -shm sidecar, which is unreliable for
++    // Codex homes on Solaris NFS mounts. Older runs may have left an empty WAL
++    // plus stale SHM file before the Solaris rollback-journal switch.
++    let wal_path = sqlite_sidecar_path(path, "-wal");
++    let shm_path = sqlite_sidecar_path(path, "-shm");
++
++    let should_remove = match std::fs::metadata(&wal_path) {
++        Ok(metadata) => metadata.len() == 0,
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
++        Err(err) => {
++            warn!(
++                "failed to inspect SQLite WAL sidecar {} before Solaris cleanup: {err}",
++                wal_path.display()
++            );
++            false
++        }
++    };
++
++    if !should_remove {
++        return;
++    }
++
++    for sidecar in [wal_path, shm_path] {
++        match std::fs::remove_file(&sidecar) {
++            Ok(()) => {}
++            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
++            Err(err) => warn!(
++                "failed to remove stale SQLite sidecar {} before Solaris startup: {err}",
++                sidecar.display()
++            ),
++        }
++    }
++}
++
++#[cfg(target_os = "solaris")]
++fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
++    let mut sidecar = OsString::from(path.as_os_str());
++    sidecar.push(suffix);
++    PathBuf::from(sidecar)
++}
++
++#[cfg(target_os = "solaris")]
++async fn prepare_solaris_sqlite_for_rollback_journal(path: &Path) -> anyhow::Result<()> {
++    match std::fs::metadata(path) {
++        Ok(_) => {}
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++        Err(err) => return Err(err.into()),
++    }
++
++    cleanup_solaris_wal_sidecars(path);
++
++    let options = SqliteConnectOptions::new()
++        .filename(path)
++        .create_if_missing(true)
++        .locking_mode(SqliteLockingMode::Exclusive)
++        .journal_mode(SqliteJournalMode::Delete)
++        .synchronous(SqliteSynchronous::Normal)
++        .busy_timeout(Duration::from_secs(5))
++        .log_statements(LevelFilter::Off);
++    let conn = options.connect().await?;
++    conn.close().await?;
++
++    cleanup_solaris_wal_sidecars(path);
++    Ok(())
++}
++
+ async fn open_state_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
+     // New state DBs should use incremental auto-vacuum, but retrofitting an
+     // existing DB requires a full VACUUM. Do not attempt that during process
+     // startup: it is maintenance work that can contend with foreground writers.
++    #[cfg(target_os = "solaris")]
++    prepare_solaris_sqlite_for_rollback_journal(path).await?;
++
+     let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
+     let pool = SqlitePoolOptions::new()
+         .max_connections(5)
+@@ -181,6 +269,9 @@ async fn open_state_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<S
+ }
+ 
+ async fn open_logs_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
++    #[cfg(target_os = "solaris")]
++    prepare_solaris_sqlite_for_rollback_journal(path).await?;
++
+     let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
+     let pool = SqlitePoolOptions::new()
+         .max_connections(5)
