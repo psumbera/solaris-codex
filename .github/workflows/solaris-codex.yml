@@ -1,0 +1,163 @@
+name: Solaris Codex
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/solaris-codex.yml"
+      - "build-codex.sh"
+      - "build-gn.sh"
+      - "build-v8.sh"
+      - "common.sh"
+      - "prepare-rust.sh"
+      - "prepare-sources.sh"
+      - "versions.sh"
+      - "patches/**"
+      - "support/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_on_solaris:
+    name: Build Solaris x86
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      asset_prefix: ${{ steps.metadata.outputs.asset_prefix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and package inside Solaris VM
+        uses: vmactions/solaris-vm@v1.1.1
+        with:
+          release: "11.4-gcc"
+          usesh: true
+          sync: nfs
+          copyback: false
+          prepare: |
+            uname -a
+          run: |
+            set -eu
+
+            REPO=`pwd`
+            WORK=/var/tmp/solaris-codex
+
+            rm -rf "$WORK"
+            git clone "$REPO" "$WORK"
+            cd "$WORK"
+
+            bash build-codex.sh
+
+            build/install/gn/bin/gn --version
+            test -f build/install/v8/lib/librusty_v8.a
+            build/install/codex/bin/codex --version
+
+            VERSION=`build/install/codex/bin/codex --version | /usr/bin/nawk '
+              match($0, /[0-9]+(\.[0-9]+)+/) {
+                print substr($0, RSTART, RLENGTH)
+                exit
+              }
+            '`
+            test -n "$VERSION"
+
+            ASSET_PREFIX=codex-${VERSION}_SunOS-i386
+            PACKAGE_DIR=/var/tmp/$ASSET_PREFIX
+
+            rm -rf "$PACKAGE_DIR"
+            mkdir -p "$PACKAGE_DIR/bin" "$REPO/archives"
+            cp build/install/codex/bin/codex "$PACKAGE_DIR/bin/codex"
+            chmod 0755 "$PACKAGE_DIR/bin/codex"
+
+            (
+              cd /var/tmp
+              gtar -czf "$REPO/archives/${ASSET_PREFIX}.tar.gz" "$ASSET_PREFIX"
+            )
+
+            DIGEST=`/usr/bin/digest -a sha256 "$REPO/archives/${ASSET_PREFIX}.tar.gz"`
+            printf '%s  %s\n' "$DIGEST" "${ASSET_PREFIX}.tar.gz" \
+              > "$REPO/archives/${ASSET_PREFIX}.tar.gz.sha256"
+
+            {
+              printf 'VERSION=%s\n' "$VERSION"
+              printf 'TAG=codex-%s\n' "$VERSION"
+              printf 'ASSET_PREFIX=%s\n' "$ASSET_PREFIX"
+            } > "$REPO/archives/version.env"
+
+      - name: Read build metadata
+        id: metadata
+        run: |
+          set -euo pipefail
+
+          . archives/version.env
+
+          {
+            printf 'version=%s\n' "$VERSION"
+            printf 'tag=%s\n' "$TAG"
+            printf 'asset_prefix=%s\n' "$ASSET_PREFIX"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release staging artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: solaris-codex-${{ steps.metadata.outputs.version }}
+          path: |
+            archives/${{ steps.metadata.outputs.asset_prefix }}.tar.gz
+            archives/${{ steps.metadata.outputs.asset_prefix }}.tar.gz.sha256
+            archives/version.env
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish GitHub release
+    if: github.event_name == 'workflow_dispatch'
+    needs: build_on_solaris
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release staging artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: solaris-codex-${{ needs.build_on_solaris.outputs.version }}
+          path: archives
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          . archives/version.env
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -f -a "$TAG" -m "Codex $VERSION for Solaris i386"
+          git push --force origin "refs/tags/$TAG"
+
+          NOTES="Solaris i386 Codex $VERSION binary built by GitHub Actions."
+          TARBALL="archives/${ASSET_PREFIX}.tar.gz"
+          CHECKSUM="archives/${ASSET_PREFIX}.tar.gz.sha256"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "Codex $VERSION for Solaris i386" \
+              --notes "$NOTES"
+            gh release upload "$TAG" "$TARBALL" "$CHECKSUM" --clobber
+          else
+            gh release create "$TAG" "$TARBALL" "$CHECKSUM" \
+              --title "Codex $VERSION for Solaris i386" \
+              --notes "$NOTES"
+          fi
