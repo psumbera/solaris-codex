@@ -16,8 +16,12 @@ ensure_gn_source
 log "Building gn"
 (
   cd "${GN_SRC_DIR}"
+  export CC=${CC:-gcc}
+  export CXX=${CXX:-g++}
+  export AR=${AR:-ar}
   python3 build/gen.py --no-last-commit-position --out-path out-solaris
   /usr/bin/perl -pi -e 's/rcsT/rcs/' out-solaris/build.ninja
+  /usr/bin/perl -pi -e 's/-Werror\b/-Werror -Wno-error=comment -Wno-error=nonnull/g' out-solaris/build.ninja
   /usr/bin/printf '#ifndef LAST_COMMIT_POSITION_H_\n#define LAST_COMMIT_POSITION_H_\n#define LAST_COMMIT_POSITION "0"\n#define LAST_COMMIT_POSITION_NUM 0\n#endif\n' \
     > out-solaris/last_commit_position.h
   ninja -C out-solaris
