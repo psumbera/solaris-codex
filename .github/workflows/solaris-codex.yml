@@ -44,6 +44,8 @@ jobs:
           prepare: |
             uname -a
             ninja --version
+            which ninja
+            pkg install developer/llvm/clang-libs
           run: |
             set -eu
 
