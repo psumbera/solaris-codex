@@ -38,6 +38,8 @@ jobs:
         uses: vmactions/solaris-vm@v1.3.3
         with:
           release: "11.4-gcc"
+          mem: 8192
+          cpu: 2
           usesh: true
           sync: nfs
           copyback: false
@@ -56,6 +58,7 @@ jobs:
             git clone "$REPO" "$WORK"
             cd "$WORK"
 
+            export SOLARIS_CODEX_JOBS=1
             bash build-codex.sh
 
             build/install/gn/bin/gn --version
