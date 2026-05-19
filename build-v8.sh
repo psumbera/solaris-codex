@@ -232,6 +232,7 @@ resolve_generated_src_binding() {
 
 ensure_bindgen_root() {
   local bindgen_bin=${BINDGEN_PREFIX}/bin/bindgen
+  local libclang_path=${LIBCLANG_PATH:-}
 
   if [[ ! -x "${bindgen_bin}" ]]; then
     maybe_enable_proxy
@@ -242,12 +243,15 @@ ensure_bindgen_root() {
 
   verify_file "${bindgen_bin}"
   verify_file "${RUST_PREFIX}/bin/rustfmt"
+  [[ -n "${libclang_path}" ]] || die "LIBCLANG_PATH is not set"
+  verify_file "${libclang_path}/libclang.so"
 
   mkdir -p "${BINDGEN_ROOT_DIR}/bin"
   ln -sf "${bindgen_bin}" "${BINDGEN_ROOT_DIR}/bin/bindgen"
   ln -sf "${RUST_PREFIX}/bin/rustfmt" "${BINDGEN_ROOT_DIR}/bin/rustfmt"
   rm -rf "${BINDGEN_ROOT_DIR}/lib"
-  ln -s /usr/llvm/21/lib/amd64 "${BINDGEN_ROOT_DIR}/lib"
+  ln -s "${libclang_path}" "${BINDGEN_ROOT_DIR}/lib"
+  log "Using libclang from ${libclang_path}"
 }
 
 prepare_rust

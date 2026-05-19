@@ -49,6 +49,69 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
 }
 
+detect_libclang_path() {
+  local candidate
+  local checked=()
+  local vdir version major minor patch score best_score=-1 best_candidate=
+  local old_nullglob
+
+  if [[ -n "${LIBCLANG_PATH:-}" ]]; then
+    if [[ -f "${LIBCLANG_PATH}/libclang.so" ]]; then
+      printf '%s\n' "${LIBCLANG_PATH}"
+      return 0
+    fi
+    die "LIBCLANG_PATH is set to ${LIBCLANG_PATH}, but ${LIBCLANG_PATH}/libclang.so was not found"
+  fi
+
+  checked+=(/usr/lib/64)
+  if [[ -f /usr/lib/64/libclang.so ]]; then
+    printf '%s\n' /usr/lib/64
+    return 0
+  fi
+
+  if shopt -q nullglob; then
+    old_nullglob=0
+  else
+    old_nullglob=1
+  fi
+  shopt -s nullglob
+
+  for vdir in /usr/llvm/*; do
+    [[ -d "${vdir}" ]] || continue
+    version=${vdir##*/}
+    IFS=. read -r major minor patch _ <<< "${version}"
+    minor=${minor:-0}
+    patch=${patch:-0}
+
+    if [[ ! "${major}" =~ ^[0-9]+$ ||
+          ! "${minor}" =~ ^[0-9]+$ ||
+          ! "${patch}" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
+
+    for candidate in "${vdir}/lib/amd64" "${vdir}/lib"; do
+      checked+=("${candidate}")
+      [[ -f "${candidate}/libclang.so" ]] || continue
+      score=$((major * 1000000 + minor * 1000 + patch))
+      if (( score > best_score )); then
+        best_score=${score}
+        best_candidate=${candidate}
+      fi
+    done
+  done
+
+  if (( old_nullglob != 0 )); then
+    shopt -u nullglob
+  fi
+
+  if [[ -n "${best_candidate}" ]]; then
+    printf '%s\n' "${best_candidate}"
+    return 0
+  fi
+
+  die "unable to find libclang.so; checked: ${checked[*]}"
+}
+
 check_supported_host() {
   local os arch
 
@@ -261,7 +324,7 @@ build_env_common() {
   export RUSTC="${RUST_PREFIX}/bin/rustc"
   export CARGO="${RUST_PREFIX}/bin/cargo"
   export NINJA=/usr/bin/ninja
-  export LIBCLANG_PATH=/usr/llvm/21/lib/amd64
+  export LIBCLANG_PATH="$(detect_libclang_path)"
   export CARGO_NET_GIT_FETCH_WITH_CLI=true
 }
 
