@@ -276,6 +276,7 @@ vendor_rust_sources() {
   local vendor_dir=$2
   local extra_file=${3:-}
   local cargo_dir=${src_dir}/.cargo
+  local config=${cargo_dir}/config.toml
   local raw=${vendor_dir}.config.raw
   local generated=${vendor_dir}.config.toml
   local stamp=${vendor_dir}/.solaris-codex-vendored
@@ -284,7 +285,9 @@ vendor_rust_sources() {
   [[ -d "${src_dir}" ]] || die "source tree not found: ${src_dir}"
   [[ -f "${src_dir}/Cargo.lock" ]] || die "missing Cargo.lock in ${src_dir}"
 
-  if [[ -d "${vendor_dir}" && -f "${cargo_dir}/config.toml" && -f "${stamp}" ]]; then
+  if [[ -d "${vendor_dir}" && -f "${config}" && -f "${stamp}" ]] &&
+     grep -q 'replace-with = "vendored-sources"' "${config}" &&
+     grep -q '^\[source\.vendored-sources\]' "${config}"; then
     return 0
   fi
 

@@ -1,0 +1,110 @@
+This patch is needed because Codex app-server daemon lifecycle locks use
+flock(2), but Rust libc does not expose that interface on Solaris.
+
+What it does:
+- keeps the existing flock-based lock path on other Unix targets
+- uses nonblocking fcntl(F_SETLK) write locks for Solaris daemon lock files
+- preserves the same busy-vs-error behavior for pid and operation locks
+
+Why it is needed:
+- without it, codex-app-server-daemon fails to build on Solaris because
+  libc::flock, LOCK_EX, and LOCK_NB are unavailable
+
+diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server-daemon/src/backend/pid.rs
+index 7f8aa16..722cfe6 100644
+--- a/codex-rs/app-server-daemon/src/backend/pid.rs
++++ b/codex-rs/app-server-daemon/src/backend/pid.rs
+@@ -471,7 +471,7 @@ enum EmptyPidReservation {
+     Record(PidRecord),
+ }
+ 
+-#[cfg(unix)]
++#[cfg(all(unix, not(target_os = "solaris")))]
+ fn try_lock_file(file: &fs::File) -> Result<bool> {
+     use std::os::fd::AsRawFd;
+ 
+@@ -487,6 +487,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
+     Err(err).context("failed to lock pid reservation")
+ }
+ 
++#[cfg(target_os = "solaris")]
++fn try_lock_file(file: &fs::File) -> Result<bool> {
++    use std::os::fd::AsRawFd;
++
++    try_lock_fd(file.as_raw_fd()).context("failed to lock pid reservation")
++}
++
++#[cfg(target_os = "solaris")]
++fn try_lock_fd(fd: i32) -> std::io::Result<bool> {
++    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
++    lock.l_type = libc::F_WRLCK as libc::c_short;
++    lock.l_whence = libc::SEEK_SET as libc::c_short;
++    lock.l_start = 0;
++    lock.l_len = 0;
++
++    let result = unsafe { libc::fcntl(fd, libc::F_SETLK, &lock) };
++    if result == 0 {
++        return Ok(true);
++    }
++
++    let err = std::io::Error::last_os_error();
++    match err.raw_os_error() {
++        Some(code) if code == libc::EAGAIN || code == libc::EACCES || code == libc::EINTR => {
++            Ok(false)
++        }
++        _ => Err(err),
++    }
++}
++
+ #[cfg(not(unix))]
+ fn try_lock_file(_file: &fs::File) -> Result<bool> {
+     bail!("pid-managed app-server startup is unsupported on this platform")
+diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
+index 4ab2230..f05d7ce 100644
+--- a/codex-rs/app-server-daemon/src/lib.rs
++++ b/codex-rs/app-server-daemon/src/lib.rs
+@@ -711,7 +711,7 @@ fn should_reexec_updater(
+         && outcome == RestartIfRunningOutcome::Restarted
+ }
+ 
+-#[cfg(unix)]
++#[cfg(all(unix, not(target_os = "solaris")))]
+ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+     use std::os::fd::AsRawFd;
+ 
+@@ -727,6 +727,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+     Err(err).context("failed to lock daemon operation")
+ }
+ 
++#[cfg(target_os = "solaris")]
++fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
++    use std::os::fd::AsRawFd;
++
++    try_lock_fd(file.as_raw_fd()).context("failed to lock daemon operation")
++}
++
++#[cfg(target_os = "solaris")]
++fn try_lock_fd(fd: i32) -> std::io::Result<bool> {
++    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
++    lock.l_type = libc::F_WRLCK as libc::c_short;
++    lock.l_whence = libc::SEEK_SET as libc::c_short;
++    lock.l_start = 0;
++    lock.l_len = 0;
++
++    let result = unsafe { libc::fcntl(fd, libc::F_SETLK, &lock) };
++    if result == 0 {
++        return Ok(true);
++    }
++
++    let err = std::io::Error::last_os_error();
++    match err.raw_os_error() {
++        Some(code) if code == libc::EAGAIN || code == libc::EACCES || code == libc::EINTR => {
++            Ok(false)
++        }
++        _ => Err(err),
++    }
++}
++
+ #[cfg(not(unix))]
+ fn try_lock_file(_file: &tokio::fs::File) -> Result<bool> {
+     Ok(true)

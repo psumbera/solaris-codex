@@ -13,10 +13,10 @@ Why it is needed:
   `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
 
 diff --git a/codex-rs/state/src/runtime.rs b/codex-rs/state/src/runtime.rs
-index c8b4e7b..2d7e541 100644
+index e95cc7c..08b4d0b 100644
 --- a/codex-rs/state/src/runtime.rs
 +++ b/codex-rs/state/src/runtime.rs
-@@ -35,6 +35,8 @@ use codex_protocol::protocol::RolloutItem;
+@@ -34,6 +34,8 @@ use codex_protocol::protocol::RolloutItem;
  use log::LevelFilter;
  use serde_json::Value;
  use sqlx::ConnectOptions;
@@ -25,7 +25,7 @@ index c8b4e7b..2d7e541 100644
  use sqlx::QueryBuilder;
  use sqlx::Row;
  use sqlx::Sqlite;
-@@ -44,9 +46,13 @@ use sqlx::migrate::Migrator;
+@@ -43,9 +45,13 @@ use sqlx::migrate::Migrator;
  use sqlx::sqlite::SqliteAutoVacuum;
  use sqlx::sqlite::SqliteConnectOptions;
  use sqlx::sqlite::SqliteJournalMode;
@@ -39,21 +39,8 @@ index c8b4e7b..2d7e541 100644
  use std::path::Path;
  use std::path::PathBuf;
  use std::sync::Arc;
-@@ -158,19 +164,101 @@ impl StateRuntime {
- }
- 
- fn base_sqlite_options(path: &Path) -> SqliteConnectOptions {
-+    #[cfg(target_os = "solaris")]
-+    cleanup_solaris_wal_sidecars(path);
-+
-     SqliteConnectOptions::new()
-         .filename(path)
-         .create_if_missing(true)
--        .journal_mode(SqliteJournalMode::Wal)
-+        .journal_mode(default_sqlite_journal_mode())
-         .synchronous(SqliteSynchronous::Normal)
-         .busy_timeout(Duration::from_secs(5))
-         .log_statements(LevelFilter::Off)
+@@ -191,11 +197,90 @@ impl StateRuntime {
+     }
  }
  
 +fn default_sqlite_journal_mode() -> SqliteJournalMode {
@@ -132,23 +119,25 @@ index c8b4e7b..2d7e541 100644
 +    Ok(())
 +}
 +
- async fn open_state_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
-     // New state DBs should use incremental auto-vacuum, but retrofitting an
-     // existing DB requires a full VACUUM. Do not attempt that during process
-     // startup: it is maintenance work that can contend with foreground writers.
+ fn base_sqlite_options(path: &Path) -> SqliteConnectOptions {
++    #[cfg(target_os = "solaris")]
++    cleanup_solaris_wal_sidecars(path);
++
+     SqliteConnectOptions::new()
+         .filename(path)
+         .create_if_missing(true)
+-        .journal_mode(SqliteJournalMode::Wal)
++        .journal_mode(default_sqlite_journal_mode())
+         .synchronous(SqliteSynchronous::Normal)
+         .busy_timeout(Duration::from_secs(5))
+         .log_statements(LevelFilter::Off)
+@@ -244,6 +329,9 @@ async fn open_sqlite(
+     migrate_phase: &'static str,
+     telemetry_override: Option<&dyn DbTelemetry>,
+ ) -> anyhow::Result<SqlitePool> {
 +    #[cfg(target_os = "solaris")]
 +    prepare_solaris_sqlite_for_rollback_journal(path).await?;
 +
      let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
-     let pool = SqlitePoolOptions::new()
-         .max_connections(5)
-@@ -181,6 +269,9 @@ async fn open_state_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<S
- }
- 
- async fn open_logs_sqlite(path: &Path, migrator: &Migrator) -> anyhow::Result<SqlitePool> {
-+    #[cfg(target_os = "solaris")]
-+    prepare_solaris_sqlite_for_rollback_journal(path).await?;
-+
-     let options = base_sqlite_options(path).auto_vacuum(SqliteAutoVacuum::Incremental);
-     let pool = SqlitePoolOptions::new()
-         .max_connections(5)
+     let started = Instant::now();
+     let pool_result = SqlitePoolOptions::new()
