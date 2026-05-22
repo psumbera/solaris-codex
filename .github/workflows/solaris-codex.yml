@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build and package inside Solaris VM
-        uses: vmactions/solaris-vm@v1.3.3
+        uses: vmactions/solaris-vm@v1.3.4
         with:
           release: "11.4-gcc"
           mem: 8192
