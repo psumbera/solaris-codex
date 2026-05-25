@@ -1,0 +1,163 @@
+Some deployments need a general HTTPS proxy for public services while selected
+hosts must still be reached directly. On Solaris, the reqwest system proxy
+matcher can route an MCP HTTP request through the proxy even when NO_PROXY
+contains the destination host.
+
+What it does:
+- evaluates NO_PROXY/no_proxy in Codex before constructing the per-request
+  reqwest client
+- disables proxy autodetection only for destinations matching NO_PROXY/no_proxy
+- keeps existing proxy behavior for all other destinations
+
+This was offered to upstream via:
+https://github.com/openai/codex/issues/4242
+
+diff --git a/codex-rs/exec-server/src/client/reqwest_http_client.rs b/codex-rs/exec-server/src/client/reqwest_http_client.rs
+--- a/codex-rs/exec-server/src/client/reqwest_http_client.rs
++++ b/codex-rs/exec-server/src/client/reqwest_http_client.rs
+@@ -45,17 +45,23 @@ pub(crate) struct PendingReqwestHttpBodyStream {
+ /// Validates `http/request` parameters and runs the actual `reqwest` call used
+ /// by the exec-server route and the local [`HttpClient`] backend.
+ pub(crate) struct ReqwestHttpRequestRunner {
+-    client: reqwest::Client,
++    timeout_ms: Option<u64>,
+ }
+ 
+ impl ReqwestHttpClient {
+-    fn build_client(timeout_ms: Option<u64>) -> Result<reqwest::Client, ExecServerError> {
+-        let builder = match timeout_ms {
++    fn build_client(
++        timeout_ms: Option<u64>,
++        url: &Url,
++    ) -> Result<reqwest::Client, ExecServerError> {
++        let mut builder = match timeout_ms {
+             None => reqwest::Client::builder(),
+             Some(timeout_ms) => {
+                 reqwest::Client::builder().timeout(Duration::from_millis(timeout_ms))
+             }
+         };
++        if request_matches_no_proxy(url) {
++            builder = builder.no_proxy();
++        }
+         build_reqwest_client_with_custom_ca(builder)
+             .map_err(|error| ExecServerError::HttpRequest(error.to_string()))
+     }
+@@ -111,9 +117,7 @@ impl HttpClient for ReqwestHttpClient {
+ 
+ impl ReqwestHttpRequestRunner {
+     pub(crate) fn new(timeout_ms: Option<u64>) -> Result<Self, JSONRPCErrorError> {
+-        let client = ReqwestHttpClient::build_client(timeout_ms)
+-            .map_err(|error| internal_error(error.to_string()))?;
+-        Ok(Self { client })
++        Ok(Self { timeout_ms })
+     }
+ 
+     pub(crate) async fn run(
+@@ -137,5 +141,7 @@ impl ReqwestHttpRequestRunner {
+         let headers = Self::build_headers(params.headers)?;
+-        let mut request = self.client.request(method, url).headers(headers);
++        let client = ReqwestHttpClient::build_client(self.timeout_ms, &url)
++            .map_err(|error| internal_error(error.to_string()))?;
++        let mut request = client.request(method, url).headers(headers);
+         if let Some(body) = params.body {
+             request = request.body(body.into_inner());
+         }
+@@ -265,3 +271,98 @@ impl ReqwestHttpRequestRunner {
+             .collect()
+     }
+ }
++
++fn request_matches_no_proxy(url: &Url) -> bool {
++    let Some(host) = url.host_str() else {
++        return false;
++    };
++    let Some(no_proxy) = configured_no_proxy() else {
++        return false;
++    };
++    no_proxy_list_matches_host(&no_proxy, host)
++}
++
++fn configured_no_proxy() -> Option<String> {
++    ["NO_PROXY", "no_proxy"].into_iter().find_map(|key| {
++        let value = std::env::var(key).ok()?;
++        if value.trim().is_empty() {
++            return None;
++        }
++        Some(value)
++    })
++}
++
++fn no_proxy_list_matches_host(no_proxy: &str, host: &str) -> bool {
++    let host = normalize_no_proxy_host(host);
++    if host.is_empty() {
++        return false;
++    }
++
++    no_proxy.split(',').any(|entry| {
++        let entry = normalize_no_proxy_host(strip_no_proxy_port(entry.trim()));
++        if entry.is_empty() {
++            return false;
++        }
++        if entry == "*" {
++            return true;
++        }
++
++        let entry = entry.strip_prefix('.').unwrap_or(&entry);
++        host == entry || host.ends_with(&format!(".{entry}"))
++    })
++}
++
++fn normalize_no_proxy_host(host: &str) -> String {
++    host.trim()
++        .trim_matches(&['[', ']'][..])
++        .trim_end_matches('.')
++        .to_ascii_lowercase()
++}
++
++fn strip_no_proxy_port(entry: &str) -> &str {
++    let Some((host, port)) = entry.rsplit_once(':') else {
++        return entry;
++    };
++    if host.contains(':') || port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
++        return entry;
++    }
++    host
++}
++
++#[cfg(test)]
++mod no_proxy_tests {
++    use super::no_proxy_list_matches_host;
++
++    #[test]
++    fn no_proxy_matches_exact_host() {
++        assert!(no_proxy_list_matches_host(
++            "service.example.com",
++            "service.example.com"
++        ));
++    }
++
++    #[test]
++    fn no_proxy_matches_parent_domain() {
++        assert!(no_proxy_list_matches_host(
++            ".example.com",
++            "service.example.com"
++        ));
++        assert!(no_proxy_list_matches_host(
++            "example.com",
++            "service.example.com"
++        ));
++    }
++
++    #[test]
++    fn no_proxy_rejects_partial_suffix() {
++        assert!(!no_proxy_list_matches_host("example.com", "notexample.com"));
++    }
++
++    #[test]
++    fn no_proxy_ignores_optional_port() {
++        assert!(no_proxy_list_matches_host(
++            "service.example.com:443",
++            "service.example.com"
++        ));
++    }
++}

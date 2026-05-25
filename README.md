@@ -91,6 +91,11 @@ patch series under `patches/codex/` before vendoring:
 - `0006-arg0-tolerate-solaris-stale-temp-cleanup.patch` keeps stale arg0 temp
   cleanup best-effort when Solaris/NFS reports non-empty directory races during
   startup.
+- `0007-app-server-daemon-use-fcntl-locks-on-solaris.patch` replaces
+  unsupported `flock(2)` daemon lifecycle locks with Solaris `fcntl(2)` locks.
+- `0008-http-client-honor-no-proxy-before-system-proxy.patch` makes
+  exec-server HTTP requests honor `NO_PROXY`/`no_proxy` hosts before reqwest's
+  system proxy lookup.
 
 After `cargo vendor`, `build-codex.sh` still applies the remaining Solaris
 vendored-crate rewrites in place:
