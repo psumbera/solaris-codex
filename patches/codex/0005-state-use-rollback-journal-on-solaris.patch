@@ -13,10 +13,10 @@ Why it is needed:
   `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
 
 diff --git a/codex-rs/state/src/runtime.rs b/codex-rs/state/src/runtime.rs
-index e95cc7c..08b4d0b 100644
+index 8c9c6d0..2d537d2 100644
 --- a/codex-rs/state/src/runtime.rs
 +++ b/codex-rs/state/src/runtime.rs
-@@ -34,6 +34,8 @@ use codex_protocol::protocol::RolloutItem;
+@@ -36,6 +36,8 @@ use codex_protocol::protocol::RolloutItem;
  use log::LevelFilter;
  use serde_json::Value;
  use sqlx::ConnectOptions;
@@ -25,7 +25,7 @@ index e95cc7c..08b4d0b 100644
  use sqlx::QueryBuilder;
  use sqlx::Row;
  use sqlx::Sqlite;
-@@ -43,9 +45,13 @@ use sqlx::migrate::Migrator;
+@@ -45,9 +47,13 @@ use sqlx::migrate::Migrator;
  use sqlx::sqlite::SqliteAutoVacuum;
  use sqlx::sqlite::SqliteConnectOptions;
  use sqlx::sqlite::SqliteJournalMode;
@@ -39,10 +39,10 @@ index e95cc7c..08b4d0b 100644
  use std::path::Path;
  use std::path::PathBuf;
  use std::sync::Arc;
-@@ -191,11 +197,90 @@ impl StateRuntime {
+@@ -250,11 +256,90 @@ impl StateRuntime {
      }
  }
- 
+
 +fn default_sqlite_journal_mode() -> SqliteJournalMode {
 +    if cfg!(target_os = "solaris") {
 +        SqliteJournalMode::Delete
@@ -131,8 +131,8 @@ index e95cc7c..08b4d0b 100644
          .synchronous(SqliteSynchronous::Normal)
          .busy_timeout(Duration::from_secs(5))
          .log_statements(LevelFilter::Off)
-@@ -244,6 +329,9 @@ async fn open_sqlite(
-     migrate_phase: &'static str,
+@@ -293,6 +378,9 @@ async fn open_sqlite(
+     spec: RuntimeDbSpec,
      telemetry_override: Option<&dyn DbTelemetry>,
  ) -> anyhow::Result<SqlitePool> {
 +    #[cfg(target_os = "solaris")]

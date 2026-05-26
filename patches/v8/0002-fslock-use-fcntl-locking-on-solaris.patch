@@ -10,9 +10,10 @@ Why it is needed:
 - without it, the `v8-solaris` crate cannot use the vendored `fslock` crate
   correctly on Solaris
 
---- a/v8-146.4.0-vendored-sources/fslock/src/unix.rs
-+++ b/v8-146.4.0-vendored-sources/fslock/src/unix.rs
-@@ -318,37 +318,97 @@ pub fn truncate(fd: FileDesc) -> Result<(), Error> {
+--- a/v8-147.4.0-vendored-sources/fslock/src/unix.rs
++++ b/v8-147.4.0-vendored-sources/fslock/src/unix.rs
+@@ -317,7 +317,27 @@
+     }
  }
  
 +#[cfg(any(target_os = "solaris", target_os = "illumos"))]
@@ -39,11 +40,10 @@ Why it is needed:
  pub fn lock(fd: FileDesc) -> Result<(), Error> {
      let res = unsafe { libc::flock(fd, libc::LOCK_EX) };
      if res >= 0 {
-         Ok(())
-     } else {
-         Err(Error::last_os_error())
-+    }
-+}
+@@ -327,7 +347,14 @@
+     }
+ }
+-
 +
 +/// Tries to lock a file and blocks until it is possible to lock.
 +#[cfg(any(target_os = "solaris", target_os = "illumos"))]
@@ -51,26 +51,18 @@ Why it is needed:
 +    set_lock(fd, libc::F_SETLKW, libc::F_WRLCK)
 +}
 +
-+/// Tries to lock a file but returns as soon as possible if already locked.
+ /// Tries to lock a file but returns as soon as possible if already locked.
 +#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
-+pub fn try_lock(fd: FileDesc) -> Result<bool, Error> {
-+    let res = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
-+    if res >= 0 {
-+        Ok(true)
-+    } else {
-+        let err = errno();
-+        if err == libc::EWOULDBLOCK || err == libc::EINTR {
-+            Ok(false)
-+        } else {
-+            Err(Error::from_raw_os_error(err as i32))
-+        }
+ pub fn try_lock(fd: FileDesc) -> Result<bool, Error> {
+     let res = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+     if res >= 0 {
+@@ -342,7 +369,33 @@
      }
  }
  
- /// Tries to lock a file but returns as soon as possible if already locked.
++/// Tries to lock a file but returns as soon as possible if already locked.
 +#[cfg(any(target_os = "solaris", target_os = "illumos"))]
- pub fn try_lock(fd: FileDesc) -> Result<bool, Error> {
--    let res = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
++pub fn try_lock(fd: FileDesc) -> Result<bool, Error> {
 +    let mut lock = libc::flock {
 +        l_type: libc::F_WRLCK,
 +        l_whence: libc::SEEK_SET as libc::c_short,
@@ -81,34 +73,34 @@ Why it is needed:
 +        l_pad: [0; 4],
 +    };
 +    let res = unsafe { libc::fcntl(fd, libc::F_SETLK, &mut lock) };
-     if res >= 0 {
-         Ok(true)
-     } else {
-         let err = errno();
--        if err == libc::EWOULDBLOCK || err == libc::EINTR {
++    if res >= 0 {
++        Ok(true)
++    } else {
++        let err = errno();
 +        if err == libc::EWOULDBLOCK || err == libc::EAGAIN || err == libc::EACCES || err == libc::EINTR {
-             Ok(false)
-         } else {
-             Err(Error::from_raw_os_error(err as i32))
-         }
-     }
- }
- 
++            Ok(false)
++        } else {
++            Err(Error::from_raw_os_error(err as i32))
++        }
++    }
++}
++
  /// Unlocks the file.
 +#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
  pub fn unlock(fd: FileDesc) -> Result<(), Error> {
      let res = unsafe { libc::flock(fd, libc::LOCK_UN) };
      if res >= 0 {
-         Ok(())
-     } else {
-         Err(Error::last_os_error())
-+    }
-+}
+@@ -352,6 +405,12 @@
+     }
+ }
+-
 +
 +/// Unlocks the file.
 +#[cfg(any(target_os = "solaris", target_os = "illumos"))]
 +pub fn unlock(fd: FileDesc) -> Result<(), Error> {
 +    set_lock(fd, libc::F_SETLK, libc::F_UNLCK)
- }
- 
++}
++
  /// Closes the file.
+ pub fn close(fd: FileDesc) {
+     unsafe { libc::close(fd) };

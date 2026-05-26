@@ -344,12 +344,66 @@ checksum_json.write_text(json.dumps(data, separators=(",", ":")))
 PY2
 }
 
+v8_install_matches_pin() {
+  local stamp=${V8_INSTALL_DIR}/.source-ref
+  local current=
+
+  [[ -f "${V8_INSTALL_DIR}/lib/librusty_v8.a" ]] || return 1
+  [[ -f "${V8_INSTALL_DIR}/share/src_binding.rs" ]] || return 1
+  [[ -f "${stamp}" ]] || return 1
+
+  current=$(tr '\n' ' ' < "${stamp}" | sed 's/ $//')
+  [[ "${current}" == "${V8_GIT_URL} ${V8_GIT_REF}" ]]
+}
+
+refresh_cached_rusty_v8_archive() {
+  local cached_dir=${CODEX_SRC_DIR}/target/release/gn_out/obj
+  local cached_archive=${cached_dir}/librusty_v8.a
+  local cached_stamp=${cached_dir}/.source-ref
+  local target_dir=${CODEX_SRC_DIR}/target/release
+  local v8_rlib=
+  local current=
+  local desired="${V8_GIT_URL} ${V8_GIT_REF}"
+  local refresh=0
+
+  [[ -f "${cached_archive}" ]] || return 0
+
+  if [[ -f "${cached_stamp}" ]]; then
+    current=$(tr '\n' ' ' < "${cached_stamp}" | sed 's/ $//')
+  fi
+
+  if ! cmp -s "${V8_INSTALL_DIR}/lib/librusty_v8.a" "${cached_archive}" ||
+     [[ "${current}" != "${desired}" ]]; then
+    refresh=1
+  fi
+
+  for v8_rlib in "${target_dir}"/deps/libv8-*.rlib; do
+    [[ -e "${v8_rlib}" ]] || continue
+    if [[ -f "${cached_stamp}" && "${v8_rlib}" -ot "${cached_stamp}" ]]; then
+      refresh=1
+      break
+    fi
+  done
+
+  if (( refresh )); then
+    log "Refreshing cargo cached librusty_v8.a"
+    rm -f "${target_dir}/deps/libv8-"*.rlib
+    rm -f "${target_dir}/deps/libv8-"*.rmeta
+    rm -f "${target_dir}/deps/v8-"*.d
+    rm -rf "${target_dir}/build/v8-"*
+    rm -rf "${target_dir}/.fingerprint/v8-"*
+    mkdir -p "${cached_dir}"
+    cp "${V8_INSTALL_DIR}/lib/librusty_v8.a" "${cached_archive}"
+    printf '%s\n%s\n' "${V8_GIT_URL}" "${V8_GIT_REF}" > "${cached_stamp}"
+  fi
+}
+
 
 
 prepare_rust
 build_env_common
 
-[[ -f "${V8_INSTALL_DIR}/lib/librusty_v8.a" ]] || bash "${TOP}/build-v8.sh"
+v8_install_matches_pin || bash "${TOP}/build-v8.sh"
 
 ensure_codex_source
 apply_patch_series "${CODEX_REPO_DIR}" "${TOP}/patches/codex"
@@ -372,6 +426,8 @@ export LD_OPTIONS=
 export LD_EXEC_OPTIONS=
 export LD_PIE_OPTIONS=
 export LD_SHARED_OPTIONS=
+
+refresh_cached_rusty_v8_archive
 
 jobs=${SOLARIS_CODEX_JOBS:-$(psrinfo | wc -l 2>/dev/null || printf 40)}
 jobs=$(printf %s "${jobs}" | tr -cd '0-9')

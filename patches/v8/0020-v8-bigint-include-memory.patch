@@ -1,0 +1,21 @@
+This patch is needed because V8's bigint header uses C++ memory utilities
+without directly including the header that declares them.
+
+What it does:
+- includes <memory> before using std::unique_ptr and
+  std::make_unique_for_overwrite
+
+Why it is needed:
+- without it, GCC on Solaris fails the V8 147.4.0 build with unresolved
+  std::unique_ptr and std::make_unique_for_overwrite declarations
+
+--- a/v8-147.4.0/v8/src/bigint/bigint.h
++++ b/v8-147.4.0/v8/src/bigint/bigint.h
+@@ -10,6 +10,7 @@
+ #include <algorithm>
+ #include <cstring>
+ #include <iostream>
++#include <memory>
+ #include <utility>
+ 
+ namespace v8 {

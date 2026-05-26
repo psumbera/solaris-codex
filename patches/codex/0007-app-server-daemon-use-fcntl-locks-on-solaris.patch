@@ -11,22 +11,22 @@ Why it is needed:
   libc::flock, LOCK_EX, and LOCK_NB are unavailable
 
 diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server-daemon/src/backend/pid.rs
-index 7f8aa16..722cfe6 100644
+index f5f4fc5..1742d25 100644
 --- a/codex-rs/app-server-daemon/src/backend/pid.rs
 +++ b/codex-rs/app-server-daemon/src/backend/pid.rs
-@@ -471,7 +471,7 @@ enum EmptyPidReservation {
+@@ -571,7 +571,7 @@ enum EmptyPidReservation {
      Record(PidRecord),
  }
- 
+
 -#[cfg(unix)]
 +#[cfg(all(unix, not(target_os = "solaris")))]
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
- 
-@@ -487,6 +487,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
+
+@@ -587,6 +587,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
      Err(err).context("failed to lock pid reservation")
  }
- 
+
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;
@@ -60,22 +60,22 @@ index 7f8aa16..722cfe6 100644
  fn try_lock_file(_file: &fs::File) -> Result<bool> {
      bail!("pid-managed app-server startup is unsupported on this platform")
 diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
-index 4ab2230..f05d7ce 100644
+index 62864fd..c2e2084 100644
 --- a/codex-rs/app-server-daemon/src/lib.rs
 +++ b/codex-rs/app-server-daemon/src/lib.rs
-@@ -711,7 +711,7 @@ fn should_reexec_updater(
+@@ -807,7 +807,7 @@ fn should_reexec_updater(
          && outcome == RestartIfRunningOutcome::Restarted
  }
- 
+
 -#[cfg(unix)]
 +#[cfg(all(unix, not(target_os = "solaris")))]
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
- 
-@@ -727,6 +727,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+
+@@ -823,6 +823,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      Err(err).context("failed to lock daemon operation")
  }
- 
+
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;

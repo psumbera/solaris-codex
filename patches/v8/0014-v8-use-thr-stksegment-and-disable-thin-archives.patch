@@ -9,19 +9,19 @@ Why it is needed:
 - without it, the Solaris build either uses the wrong stack helpers or hits
   archive handling that the Solaris toolchain does not support correctly
 
---- a/v8-146.4.0/build/config/compiler/BUILD.gn
-+++ b/v8-146.4.0/build/config/compiler/BUILD.gn
-@@ -2552,7 +2552,7 @@
+--- a/v8-147.4.0/build/config/compiler/BUILD.gn
++++ b/v8-147.4.0/build/config/compiler/BUILD.gn
+@@ -2616,7 +2616,7 @@
+       "-T",
+       "-s",
+     ]
 -  } else if ((is_posix && (!is_apple || use_lld)) || is_fuchsia) {
 +  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
      # The macOS and iOS default linker ld64 does not support reading thin
      # archives.
      arflags = [
-       "-T",
-       "-S",
-     ]
---- a/v8-146.4.0/v8/src/base/platform/platform-solaris.cc
-+++ b/v8-146.4.0/v8/src/base/platform/platform-solaris.cc
+--- a/v8-147.4.0/v8/src/base/platform/platform-solaris.cc
++++ b/v8-147.4.0/v8/src/base/platform/platform-solaris.cc
 @@ -18,6 +18,7 @@
  #include <sys/mman.h>  // mmap()
  #include <sys/regset.h>
@@ -30,7 +30,10 @@ Why it is needed:
  #include <sys/time.h>  // gettimeofday(), timeradd()
  #include <time.h>
  #include <ucontext.h>  // walkstack(), getcontext()
-@@ -75,16 +76,8 @@
+@@ -73,19 +74,11 @@
+-
++
+ // static
  Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
 -  pthread_attr_t attr;
 -  int error;
@@ -50,3 +53,5 @@ Why it is needed:
 -  pthread_attr_destroy(&attr);
    return nullptr;
  }
+-
++

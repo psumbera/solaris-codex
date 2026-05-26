@@ -9,9 +9,9 @@ Why it is needed:
 - the standalone Solaris wrapper installs `librusty_v8.a` together with a known
   good generated binding and wants downstream codex builds to reuse it
 
---- a/v8-146.4.0/build.rs
-+++ b/v8-146.4.0/build.rs
-@@ -106,7 +106,11 @@
+--- a/v8-147.4.0/build.rs
++++ b/v8-147.4.0/build.rs
+@@ -113,7 +113,11 @@
      }
  
      build_v8(is_asan);

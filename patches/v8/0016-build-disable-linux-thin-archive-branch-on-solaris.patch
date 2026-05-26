@@ -8,8 +8,14 @@ Why it is needed:
 - without it, the build tries to use a Linux archive path that Solaris ar does
   not support
 
---- a/v8-146.4.0/build/config/compiler/BUILD.gn
-+++ b/v8-146.4.0/build/config/compiler/BUILD.gn
-@@ -2544 +2544 @@
+--- a/v8-147.4.0/build/config/compiler/BUILD.gn
++++ b/v8-147.4.0/build/config/compiler/BUILD.gn
+@@ -2608,7 +2608,7 @@
+ # 2. Remove the thin_archive config, so that the .a file actually contains all
+ #    .o files, instead of just references to .o files in the build directoy
+ config("thin_archive") {
 -  if ((is_apple && use_lld) || (is_linux && !is_clang) || current_os == "aix") {
 +  if ((is_apple && use_lld) || (is_linux && current_os != "solaris" && !is_clang) || current_os == "aix") {
+     # The macOS and iOS linker ld64.ldd doesn't support thin archive without
+     # symbol table, gcc on linux also throws the error `archive has no index`.
+     # AIX does support -s option, not -S option.

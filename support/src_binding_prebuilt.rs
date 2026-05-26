@@ -914,10 +914,10 @@ pub use self::v8_GCType as v8__GCType;
 #[doc = " Interceptor callbacks use this value to indicate whether the request was\n intercepted or not.\n\n The values for constants and type are chosen this way for better\n performance."]
 pub use self::v8_Intercepted as v8__Intercepted;
 pub const v8__MAJOR_VERSION: u32 = 14;
-pub const v8__MINOR_VERSION: u32 = 6;
-pub const v8__BUILD_NUMBER: u32 = 202;
-pub const v8__PATCH_LEVEL: u32 = 9;
-pub const v8__VERSION_STRING: &::std::ffi::CStr = c"14.6.202.9-rusty";
+pub const v8__MINOR_VERSION: u32 = 7;
+pub const v8__BUILD_NUMBER: u32 = 173;
+pub const v8__PATCH_LEVEL: u32 = 20;
+pub const v8__VERSION_STRING: &::std::ffi::CStr = c"14.7.173.20-rusty";
 #[repr(C)]
 #[derive(Debug)]
 pub struct ExternalConstOneByteStringResource {
