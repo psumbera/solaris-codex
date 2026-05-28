@@ -230,10 +230,10 @@ index 46bbb35..da0ebcb 100644
      out
  }
 diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
-index cbd1970..cc03e3b 100644
+index 7348e3b..6a4d0d1 100644
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
-@@ -1301,7 +1301,16 @@ async fn run_ratatui_app(
+@@ -1300,7 +1300,16 @@ async fn run_ratatui_app(
          prev_hook(info);
      }));
      let mut initialized_terminal = tui::init()?;
@@ -352,7 +352,7 @@ index 53c68d9..331b83d 100644
  mod imp {
      use super::DefaultColors;
 diff --git a/codex-rs/tui/src/tui.rs b/codex-rs/tui/src/tui.rs
-index 32123b7..bb451ba 100644
+index 47a6aeb..7b32d71 100644
 --- a/codex-rs/tui/src/tui.rs
 +++ b/codex-rs/tui/src/tui.rs
 @@ -16,9 +16,13 @@ use std::time::Duration;
@@ -379,10 +379,10 @@ index 32123b7..bb451ba 100644
  use tokio::sync::broadcast;
  use tokio_stream::Stream;
 
-@@ -166,18 +172,23 @@ mod tests {
- }
-
+@@ -168,18 +174,23 @@ mod tests {
  pub fn set_modes() -> Result<()> {
+     ensure_virtual_terminal_processing()?;
+
 -    execute!(stdout(), EnableBracketedPaste)?;
 -
      enable_raw_mode()?;
@@ -414,10 +414,10 @@ index 32123b7..bb451ba 100644
      Ok(())
  }
 
-@@ -239,12 +250,21 @@ fn restore_common(
-     raw_mode_restore: RawModeRestore,
-     keyboard_restore: KeyboardRestore,
+@@ -243,14 +254,20 @@ fn restore_common(
  ) -> Result<()> {
+     let mut first_error = ensure_virtual_terminal_processing().err();
+
 +    #[cfg(target_os = "solaris")]
 +    let _ = keyboard_restore;
 +
@@ -427,16 +427,15 @@ index 32123b7..bb451ba 100644
          KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
      }
 
-+    #[cfg(target_os = "solaris")]
-+    let mut first_error = None;
 +    #[cfg(not(target_os = "solaris"))]
-     let mut first_error = execute!(stdout(), DisableBracketedPaste).err();
-+
+     if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
+         first_error.get_or_insert(err);
+     }
 +    #[cfg(not(target_os = "solaris"))]
      let _ = execute!(stdout(), DisableFocusChange);
      if matches!(raw_mode_restore, RawModeRestore::Disable)
          && let Err(err) = disable_raw_mode()
-@@ -355,7 +375,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
+@@ -361,7 +378,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
      #[cfg(unix)]
      let backend = CrosstermBackend::new(stdout());
 
@@ -445,7 +444,7 @@ index 32123b7..bb451ba 100644
      let startup_probe = {
          use crate::terminal_probe::StartupKeyboardEnhancementProbe;
 
-@@ -391,6 +411,13 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
+@@ -397,6 +414,13 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
          }
      };
 
@@ -459,7 +458,7 @@ index 32123b7..bb451ba 100644
      #[cfg(unix)]
      crate::terminal_palette::set_default_colors_from_startup_probe(startup_probe.default_colors);
 
-@@ -490,6 +517,14 @@ struct PendingHistoryLines {
+@@ -496,6 +520,14 @@ struct PendingHistoryLines {
      wrap_policy: HistoryLineWrapPolicy,
  }
 
@@ -474,7 +473,7 @@ index 32123b7..bb451ba 100644
  fn clear_for_viewport_change<B>(terminal: &mut CustomTerminal<B>, new_area: Rect) -> Result<()>
  where
      B: Backend + Write,
-@@ -527,13 +562,13 @@ impl Tui {
+@@ -533,13 +565,13 @@ impl Tui {
              enhanced_keys_supported,
              notification_backend: Some(detect_backend(NotificationMethod::default())),
              notification_condition: NotificationCondition::default(),
@@ -490,19 +489,30 @@ index 32123b7..bb451ba 100644
      }
 
      pub fn set_notification_settings(
-@@ -795,9 +830,10 @@ impl Tui {
+@@ -801,42 +833,54 @@ impl Tui {
 
          // Precompute any viewport updates that need a cursor-position query before entering
          // the synchronized update, to avoid racing with the event reader.
 +        let alt_screen_enabled = self.alt_screen_enabled;
          let mut pending_viewport_area = self.pending_viewport_area()?;
 
+         ensure_virtual_terminal_processing()?;
+
 -        stdout().sync_update(|_| {
 +        let mut render_once = || -> Result<()> {
              #[cfg(unix)]
              if let Some(prepared) = prepared_resume.take() {
                  prepared.apply(&mut self.terminal)?;
-@@ -811,24 +847,33 @@ impl Tui {
+             }
+
+             let terminal = &mut self.terminal;
+-            if let Some(new_area) = pending_viewport_area.take() {
++            if alt_screen_enabled
++                && let Some(new_area) = pending_viewport_area.take()
++            {
+                 terminal.set_viewport_area(new_area);
+                 terminal.clear()?;
+             }
 
              let size = terminal.size()?;
 
@@ -553,7 +563,7 @@ index 32123b7..bb451ba 100644
 
              // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
              #[cfg(unix)]
-@@ -847,7 +892,13 @@ impl Tui {
+@@ -855,7 +899,13 @@ impl Tui {
              terminal.draw(|frame| {
                  draw_fn(frame);
              })
@@ -568,7 +578,7 @@ index 32123b7..bb451ba 100644
      }
 
      pub fn draw_ambient_pet_image(
-@@ -941,12 +992,18 @@ impl Tui {
+@@ -963,12 +1013,18 @@ impl Tui {
              }
 
              terminal.draw(|frame| {
