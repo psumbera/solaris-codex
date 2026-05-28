@@ -45,8 +45,7 @@ jobs:
           copyback: false
           prepare: |
             uname -a
-            ninja --version
-            which ninja
+            zfs set volsize=8g rpool/swap
             pkg install developer/llvm/clang-libs
           run: |
             set -eu
