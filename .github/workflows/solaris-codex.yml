@@ -46,7 +46,7 @@ jobs:
           prepare: |
             uname -a
             zfs set volsize=8g rpool/swap
-            pkg install developer/llvm/clang-libs
+            pkg install developer/llvm/clang
           run: |
             set -eu
 
