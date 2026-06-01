@@ -11,10 +11,10 @@ Why it is needed:
   at runtime when clipboard actions are attempted on Solaris
 
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index c213e92..5c49e38 100644
+index ffc5c5a..f8c345a 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
-@@ -145,9 +145,9 @@ windows-sys = { version = "0.52", features = [
+@@ -144,9 +144,9 @@ windows-sys = { version = "0.52", features = [
  ] }
  winsplit = "0.1"
  

@@ -11,10 +11,10 @@ Why it is needed:
   variables and does not disable core dumps at startup
 
 diff --git a/codex-rs/process-hardening/src/lib.rs b/codex-rs/process-hardening/src/lib.rs
-index f9695fc..a8c0780 100644
+index f500e15..ebd82f5 100644
 --- a/codex-rs/process-hardening/src/lib.rs
 +++ b/codex-rs/process-hardening/src/lib.rs
-@@ -17,8 +17,8 @@ pub fn pre_main_hardening() {
+@@ -16,8 +16,8 @@ pub fn pre_main_hardening() {
      #[cfg(target_os = "macos")]
      pre_main_hardening_macos();
  
@@ -25,7 +25,7 @@ index f9695fc..a8c0780 100644
      pre_main_hardening_bsd();
  
      #[cfg(windows)]
-@@ -37,7 +37,8 @@ const PTRACE_DENY_ATTACH_FAILED_EXIT_CODE: i32 = 6;
+@@ -36,7 +36,8 @@ const PTRACE_DENY_ATTACH_FAILED_EXIT_CODE: i32 = 6;
      target_os = "macos",
      target_os = "freebsd",
      target_os = "netbsd",
@@ -35,7 +35,7 @@ index f9695fc..a8c0780 100644
  ))]
  const SET_RLIMIT_CORE_FAILED_EXIT_CODE: i32 = 7;
  
-@@ -72,9 +73,9 @@ pub fn disable_process_dumping() -> std::io::Result<()> {
+@@ -71,9 +72,9 @@ pub fn disable_process_dumping() -> std::io::Result<()> {
      }
  }
  

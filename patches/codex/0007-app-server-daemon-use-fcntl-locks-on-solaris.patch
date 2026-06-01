@@ -60,10 +60,10 @@ index f5f4fc5..1742d25 100644
  fn try_lock_file(_file: &fs::File) -> Result<bool> {
      bail!("pid-managed app-server startup is unsupported on this platform")
 diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
-index 62864fd..c2e2084 100644
+index 354c08e..0357ca5 100644
 --- a/codex-rs/app-server-daemon/src/lib.rs
 +++ b/codex-rs/app-server-daemon/src/lib.rs
-@@ -807,7 +807,7 @@ fn should_reexec_updater(
+@@ -813,7 +813,7 @@ fn should_reexec_updater(
          && outcome == RestartIfRunningOutcome::Restarted
  }
 
@@ -72,7 +72,7 @@ index 62864fd..c2e2084 100644
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
 
-@@ -823,6 +823,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+@@ -829,6 +829,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      Err(err).context("failed to lock daemon operation")
  }
 

@@ -6,16 +6,31 @@ What it does:
 - avoids terminal capability probes and keyboard modes that proved unreliable on Solaris
 - prefers ASCII-safe prompts and separators on older terminals
 - keeps startup and inline rendering on the safer non-alt-screen path where needed
+- leaves the new resize-reflow renderer disabled on Solaris until it is validated there
 
 Why it is needed:
 - without it, the Solaris TUI can miss input, stall during startup, or render
   poorly in terminals commonly used on Solaris systems
 
+diff --git a/codex-rs/tui/src/app/resize_reflow.rs b/codex-rs/tui/src/app/resize_reflow.rs
+index 6ef1721..8f6eeff 100644
+--- a/codex-rs/tui/src/app/resize_reflow.rs
++++ b/codex-rs/tui/src/app/resize_reflow.rs
+@@ -106,7 +106,8 @@ impl App {
+     }
+
+     pub(super) fn terminal_resize_reflow_enabled(&self) -> bool {
+-        self.config.features.enabled(Feature::TerminalResizeReflow)
++        !cfg!(target_os = "solaris")
++            && self.config.features.enabled(Feature::TerminalResizeReflow)
+     }
+
+     /// Start retaining initial resume replay rows before they are written to scrollback.
 diff --git a/codex-rs/tui/src/bottom_pane/chat_composer.rs b/codex-rs/tui/src/bottom_pane/chat_composer.rs
-index a3413dd..f4d0448 100644
+index e62cab9..62fc961 100644
 --- a/codex-rs/tui/src/bottom_pane/chat_composer.rs
 +++ b/codex-rs/tui/src/bottom_pane/chat_composer.rs
-@@ -212,6 +212,7 @@ use crate::render::RectExt;
+@@ -206,6 +206,7 @@ use crate::render::RectExt;
  use crate::render::renderable::Renderable;
  use crate::slash_command::SlashCommand;
  use crate::style::user_message_style;
@@ -23,7 +38,7 @@ index a3413dd..f4d0448 100644
  use codex_protocol::ThreadId;
  use codex_protocol::user_input::ByteRange;
  use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
-@@ -4629,9 +4630,13 @@ impl ChatComposer {
+@@ -4264,9 +4265,13 @@ impl ChatComposer {
              let prompt = if self.draft.input_enabled {
                  if self.draft.is_bash_mode {
                      Span::from("!").light_red().bold()
@@ -138,7 +153,7 @@ index b1a3a52..fbd2174 100644
      command_display: Option<String>,
      stdin: String,
 diff --git a/codex-rs/tui/src/history_cell/messages.rs b/codex-rs/tui/src/history_cell/messages.rs
-index 046d190..6ac5e2b 100644
+index 19a6ec2..09b91e9 100644
 --- a/codex-rs/tui/src/history_cell/messages.rs
 +++ b/codex-rs/tui/src/history_cell/messages.rs
 @@ -167,7 +167,7 @@ impl HistoryCell for UserHistoryCell {
@@ -162,7 +177,7 @@ index 046d190..6ac5e2b 100644
  pub(crate) struct ReasoningSummaryCell {
      _header: String,
 diff --git a/codex-rs/tui/src/history_cell/mod.rs b/codex-rs/tui/src/history_cell/mod.rs
-index 797037a..8e8662c 100644
+index 12788a5..e833c1d 100644
 --- a/codex-rs/tui/src/history_cell/mod.rs
 +++ b/codex-rs/tui/src/history_cell/mod.rs
 @@ -33,6 +33,7 @@ use crate::render::renderable::Renderable;
@@ -174,7 +189,7 @@ index 797037a..8e8662c 100644
  use crate::test_support::PathBufExt;
  #[cfg(test)]
 diff --git a/codex-rs/tui/src/history_cell/session.rs b/codex-rs/tui/src/history_cell/session.rs
-index 46bbb35..da0ebcb 100644
+index 23e8836..b65e0d5 100644
 --- a/codex-rs/tui/src/history_cell/session.rs
 +++ b/codex-rs/tui/src/history_cell/session.rs
 @@ -48,7 +48,21 @@ fn with_border_internal(
@@ -206,7 +221,7 @@ index 46bbb35..da0ebcb 100644
          let mut spans: Vec<Span<'static>> = Vec::with_capacity(span_count + 4);
 -        spans.push(Span::from("│ ").dim());
 +        spans.push(Span::from(format!("{vertical} ")).dim());
-         spans.extend(line.into_iter());
+         spans.extend(line);
          if used_width < content_width {
              spans.push(Span::from(" ".repeat(content_width - used_width)).dim());
          }
@@ -230,10 +245,10 @@ index 46bbb35..da0ebcb 100644
      out
  }
 diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
-index 7348e3b..6a4d0d1 100644
+index 34065b7..e66a71f 100644
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
-@@ -1300,7 +1300,16 @@ async fn run_ratatui_app(
+@@ -1317,7 +1317,16 @@ async fn run_ratatui_app(
          prev_hook(info);
      }));
      let mut initialized_terminal = tui::init()?;
@@ -252,13 +267,13 @@ index 7348e3b..6a4d0d1 100644
      let mut tui = Tui::new(
          initialized_terminal.terminal,
 diff --git a/codex-rs/tui/src/onboarding/onboarding_screen.rs b/codex-rs/tui/src/onboarding/onboarding_screen.rs
-index 6edb6a6..086399e 100644
+index 5291934..35857b1 100644
 --- a/codex-rs/tui/src/onboarding/onboarding_screen.rs
 +++ b/codex-rs/tui/src/onboarding/onboarding_screen.rs
-@@ -511,9 +511,15 @@ pub(crate) async fn run_onboarding_app(
-                     match event {
-                         TuiEvent::Key(key_event) => {
-                             onboarding_screen.handle_key_event(key_event);
+@@ -506,9 +506,15 @@ pub(crate) async fn run_onboarding_app(
+                                 )
+                                 .await;
+                             }
 +                            let _ = tui.draw(u16::MAX, |frame| {
 +                                frame.render_widget_ref(&onboarding_screen, frame.area());
 +                            });
@@ -272,10 +287,10 @@ index 6edb6a6..086399e 100644
                          TuiEvent::Draw | TuiEvent::Resize => {
                              if !did_full_clear_after_success
 diff --git a/codex-rs/tui/src/status_indicator_widget.rs b/codex-rs/tui/src/status_indicator_widget.rs
-index dabe005..b7b7dd8 100644
+index 0438c20..2b2cfe0 100644
 --- a/codex-rs/tui/src/status_indicator_widget.rs
 +++ b/codex-rs/tui/src/status_indicator_widget.rs
-@@ -26,6 +26,7 @@ use crate::motion::ReducedMotionIndicator;
+@@ -27,6 +27,7 @@ use crate::motion::ReducedMotionIndicator;
  use crate::motion::activity_indicator;
  use crate::motion::shimmer_text;
  use crate::render::renderable::Renderable;
@@ -283,7 +298,7 @@ index dabe005..b7b7dd8 100644
  use crate::text_formatting::capitalize_first;
  use crate::tui::FrameRequester;
  use crate::wrapping::RtOptions;
-@@ -269,7 +270,7 @@ impl Renderable for StatusIndicatorWidget {
+@@ -278,7 +279,7 @@ impl Renderable for StatusIndicatorWidget {
          if let Some(message) = &self.inline_message {
              // Keep optional context after elapsed/interrupt text so that core
              // interrupt affordances stay in a fixed visual location.
@@ -352,7 +367,7 @@ index 53c68d9..331b83d 100644
  mod imp {
      use super::DefaultColors;
 diff --git a/codex-rs/tui/src/tui.rs b/codex-rs/tui/src/tui.rs
-index 47a6aeb..7b32d71 100644
+index ef2f1b0..6d6e40c 100644
 --- a/codex-rs/tui/src/tui.rs
 +++ b/codex-rs/tui/src/tui.rs
 @@ -16,9 +16,13 @@ use std::time::Duration;
@@ -379,7 +394,7 @@ index 47a6aeb..7b32d71 100644
  use tokio::sync::broadcast;
  use tokio_stream::Stream;
 
-@@ -168,18 +174,23 @@ mod tests {
+@@ -171,18 +177,23 @@ mod tests {
  pub fn set_modes() -> Result<()> {
      ensure_virtual_terminal_processing()?;
 
@@ -414,7 +429,7 @@ index 47a6aeb..7b32d71 100644
      Ok(())
  }
 
-@@ -243,14 +254,20 @@ fn restore_common(
+@@ -246,14 +257,20 @@ fn restore_common(
  ) -> Result<()> {
      let mut first_error = ensure_virtual_terminal_processing().err();
 
@@ -435,7 +450,7 @@ index 47a6aeb..7b32d71 100644
      let _ = execute!(stdout(), DisableFocusChange);
      if matches!(raw_mode_restore, RawModeRestore::Disable)
          && let Err(err) = disable_raw_mode()
-@@ -361,7 +378,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
+@@ -373,7 +390,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
      #[cfg(unix)]
      let backend = CrosstermBackend::new(stdout());
 
@@ -444,7 +459,7 @@ index 47a6aeb..7b32d71 100644
      let startup_probe = {
          use crate::terminal_probe::StartupKeyboardEnhancementProbe;
 
-@@ -397,6 +414,13 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
+@@ -409,6 +426,13 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
          }
      };
 
@@ -458,7 +473,7 @@ index 47a6aeb..7b32d71 100644
      #[cfg(unix)]
      crate::terminal_palette::set_default_colors_from_startup_probe(startup_probe.default_colors);
 
-@@ -496,6 +520,14 @@ struct PendingHistoryLines {
+@@ -514,6 +538,14 @@ struct PendingHistoryLines {
      wrap_policy: HistoryLineWrapPolicy,
  }
 
@@ -473,12 +488,13 @@ index 47a6aeb..7b32d71 100644
  fn clear_for_viewport_change<B>(terminal: &mut CustomTerminal<B>, new_area: Rect) -> Result<()>
  where
      B: Backend + Write,
-@@ -533,13 +565,13 @@ impl Tui {
-             enhanced_keys_supported,
+@@ -557,14 +589,14 @@ impl Tui {
              notification_backend: Some(detect_backend(NotificationMethod::default())),
              notification_condition: NotificationCondition::default(),
+             is_zellij,
 -            alt_screen_enabled: true,
 +            alt_screen_enabled: !inline_viewport_required(),
+             _stderr_guard: stderr_guard,
          }
      }
 
@@ -489,7 +505,7 @@ index 47a6aeb..7b32d71 100644
      }
 
      pub fn set_notification_settings(
-@@ -801,42 +833,54 @@ impl Tui {
+@@ -839,46 +871,58 @@ impl Tui {
 
          // Precompute any viewport updates that need a cursor-position query before entering
          // the synchronized update, to avoid racing with the event reader.
@@ -550,8 +566,16 @@ index 47a6aeb..7b32d71 100644
 +                    terminal.set_viewport_area(area);
 +                }
 
--            Self::flush_pending_history_lines(terminal, &mut self.pending_history_lines)?;
-+                Self::flush_pending_history_lines(terminal, &mut self.pending_history_lines)?;
+-            Self::flush_pending_history_lines(
+-                terminal,
+-                &mut self.pending_history_lines,
+-                self.is_zellij,
+-            )?;
++                Self::flush_pending_history_lines(
++                    terminal,
++                    &mut self.pending_history_lines,
++                    self.is_zellij,
++                )?;
 +            } else {
 +                let area = Rect::new(0, 0, size.width, height.min(size.height));
 +                if area != terminal.viewport_area {
@@ -563,7 +587,7 @@ index 47a6aeb..7b32d71 100644
 
              // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
              #[cfg(unix)]
-@@ -855,7 +899,13 @@ impl Tui {
+@@ -897,7 +941,13 @@ impl Tui {
              terminal.draw(|frame| {
                  draw_fn(frame);
              })
@@ -578,7 +602,7 @@ index 47a6aeb..7b32d71 100644
      }
 
      pub fn draw_ambient_pet_image(
-@@ -963,12 +1013,18 @@ impl Tui {
+@@ -1009,12 +1059,18 @@ impl Tui {
              }
 
              terminal.draw(|frame| {
