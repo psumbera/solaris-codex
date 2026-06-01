@@ -5,7 +5,7 @@ What it does:
 - replaces the default crossterm event stream with a Solaris stdin reader
 - avoids terminal capability probes and keyboard modes that proved unreliable on Solaris
 - prefers ASCII-safe prompts and separators on older terminals
-- keeps startup and inline rendering on the safer non-alt-screen path where needed
+- disables alternate-screen overlays where needed while keeping inline history rendering
 - leaves the new resize-reflow renderer disabled on Solaris until it is validated there
 
 Why it is needed:
@@ -118,12 +118,15 @@ diff --git a/codex-rs/tui/src/custom_terminal.rs b/codex-rs/tui/src/custom_termi
 index 995a035..0336b9d 100644
 --- a/codex-rs/tui/src/custom_terminal.rs
 +++ b/codex-rs/tui/src/custom_terminal.rs
-@@ -195,6 +195,9 @@ where
+@@ -195,6 +195,12 @@ where
      /// Creates a new [`Terminal`] with the given [`Backend`] and [`TerminalOptions`].
      pub fn with_options(mut backend: B) -> io::Result<Self> {
          let screen_size = backend.size()?;
 +        #[cfg(target_os = "solaris")]
-+        let cursor_pos = Position { x: 0, y: 0 };
++        let cursor_pos = Position {
++            x: 0,
++            y: screen_size.height.saturating_sub(1),
++        };
 +        #[cfg(not(target_os = "solaris"))]
          let cursor_pos = backend.get_cursor_position().unwrap_or_else(|err| {
              // Some PTYs do not answer CPR (`ESC[6n`); continue with a safe default instead
@@ -505,7 +508,7 @@ index ef2f1b0..6d6e40c 100644
      }
 
      pub fn set_notification_settings(
-@@ -839,46 +871,58 @@ impl Tui {
+@@ -839,46 +871,49 @@ impl Tui {
 
          // Precompute any viewport updates that need a cursor-position query before entering
          // the synchronized update, to avoid racing with the event reader.
@@ -532,62 +535,32 @@ index ef2f1b0..6d6e40c 100644
 
              let size = terminal.size()?;
 
--            let mut area = terminal.viewport_area;
--            area.height = height.min(size.height);
--            area.width = size.width;
--            // If the viewport has expanded, scroll everything else up to make room.
--            if area.bottom() > size.height {
--                terminal
--                    .backend_mut()
--                    .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
--                area.y = size.height - area.height;
--            }
--            if area != terminal.viewport_area {
--                // On startup, the old viewport can still be empty. Clear from the
--                // new viewport top so stale shell cells do not show through spaces.
--                clear_for_viewport_change(terminal, area)?;
--                terminal.set_viewport_area(area);
--            }
-+            if alt_screen_enabled {
-+                let mut area = terminal.viewport_area;
-+                area.height = height.min(size.height);
-+                area.width = size.width;
-+                // If the viewport has expanded, scroll everything else up to make room.
-+                if area.bottom() > size.height {
-+                    terminal
-+                        .backend_mut()
-+                        .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
-+                    area.y = size.height - area.height;
-+                }
-+                if area != terminal.viewport_area {
-+                    // On startup, the old viewport can still be empty. Clear from the
-+                    // new viewport top so stale shell cells do not show through spaces.
-+                    clear_for_viewport_change(terminal, area)?;
-+                    terminal.set_viewport_area(area);
-+                }
-
--            Self::flush_pending_history_lines(
--                terminal,
--                &mut self.pending_history_lines,
--                self.is_zellij,
--            )?;
-+                Self::flush_pending_history_lines(
-+                    terminal,
-+                    &mut self.pending_history_lines,
-+                    self.is_zellij,
-+                )?;
-+            } else {
-+                let area = Rect::new(0, 0, size.width, height.min(size.height));
-+                if area != terminal.viewport_area {
-+                    terminal.set_viewport_area(area);
-+                }
-+                terminal.clear()?;
-+                self.pending_history_lines.clear();
-+            }
+             let mut area = terminal.viewport_area;
+             area.height = height.min(size.height);
+             area.width = size.width;
+             // If the viewport has expanded, scroll everything else up to make room.
+             if area.bottom() > size.height {
+                 terminal
+                     .backend_mut()
+                     .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
+                 area.y = size.height - area.height;
+             }
+             if area != terminal.viewport_area {
+                 // On startup, the old viewport can still be empty. Clear from the
+                 // new viewport top so stale shell cells do not show through spaces.
+                 clear_for_viewport_change(terminal, area)?;
+                 terminal.set_viewport_area(area);
+             }
+ 
+             Self::flush_pending_history_lines(
+                 terminal,
+                 &mut self.pending_history_lines,
+                 self.is_zellij,
+             )?;
 
              // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
              #[cfg(unix)]
-@@ -897,7 +941,13 @@ impl Tui {
+@@ -897,7 +932,13 @@ impl Tui {
              terminal.draw(|frame| {
                  draw_fn(frame);
              })
@@ -602,7 +575,7 @@ index ef2f1b0..6d6e40c 100644
      }
 
      pub fn draw_ambient_pet_image(
-@@ -1009,12 +1059,18 @@ impl Tui {
+@@ -1009,12 +1050,18 @@ impl Tui {
              }
 
              terminal.draw(|frame| {
