@@ -13,10 +13,10 @@ Why it is needed:
   poorly in terminals commonly used on Solaris systems
 
 diff --git a/codex-rs/tui/src/app/resize_reflow.rs b/codex-rs/tui/src/app/resize_reflow.rs
-index 6ef1721..8f6eeff 100644
+index 34e2569..10a3920 100644
 --- a/codex-rs/tui/src/app/resize_reflow.rs
 +++ b/codex-rs/tui/src/app/resize_reflow.rs
-@@ -106,7 +106,8 @@ impl App {
+@@ -110,7 +110,8 @@ impl App {
      }
 
      pub(super) fn terminal_resize_reflow_enabled(&self) -> bool {
@@ -27,7 +27,7 @@ index 6ef1721..8f6eeff 100644
 
      /// Start retaining initial resume replay rows before they are written to scrollback.
 diff --git a/codex-rs/tui/src/bottom_pane/chat_composer.rs b/codex-rs/tui/src/bottom_pane/chat_composer.rs
-index e62cab9..62fc961 100644
+index ec32848..37b7020 100644
 --- a/codex-rs/tui/src/bottom_pane/chat_composer.rs
 +++ b/codex-rs/tui/src/bottom_pane/chat_composer.rs
 @@ -206,6 +206,7 @@ use crate::render::RectExt;
@@ -38,7 +38,7 @@ index e62cab9..62fc961 100644
  use codex_protocol::ThreadId;
  use codex_protocol::user_input::ByteRange;
  use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
-@@ -4264,9 +4265,13 @@ impl ChatComposer {
+@@ -4390,9 +4391,13 @@ impl ChatComposer {
              let prompt = if self.draft.input_enabled {
                  if self.draft.is_bash_mode {
                      Span::from("!").light_red().bold()
@@ -115,7 +115,7 @@ index ffb2a28..9bb58ac 100644
          let style = if use_theme_colors {
              let accent = StatusLineAccent::for_item(item);
 diff --git a/codex-rs/tui/src/custom_terminal.rs b/codex-rs/tui/src/custom_terminal.rs
-index 995a035..0336b9d 100644
+index 995a035..eebc492 100644
 --- a/codex-rs/tui/src/custom_terminal.rs
 +++ b/codex-rs/tui/src/custom_terminal.rs
 @@ -195,6 +195,12 @@ where
@@ -156,7 +156,7 @@ index b1a3a52..fbd2174 100644
      command_display: Option<String>,
      stdin: String,
 diff --git a/codex-rs/tui/src/history_cell/messages.rs b/codex-rs/tui/src/history_cell/messages.rs
-index 19a6ec2..09b91e9 100644
+index ed899f3..3b7f496 100644
 --- a/codex-rs/tui/src/history_cell/messages.rs
 +++ b/codex-rs/tui/src/history_cell/messages.rs
 @@ -167,7 +167,7 @@ impl HistoryCell for UserHistoryCell {
@@ -180,13 +180,13 @@ index 19a6ec2..09b91e9 100644
  pub(crate) struct ReasoningSummaryCell {
      _header: String,
 diff --git a/codex-rs/tui/src/history_cell/mod.rs b/codex-rs/tui/src/history_cell/mod.rs
-index 12788a5..e833c1d 100644
+index 9cef3e4..7336453 100644
 --- a/codex-rs/tui/src/history_cell/mod.rs
 +++ b/codex-rs/tui/src/history_cell/mod.rs
-@@ -33,6 +33,7 @@ use crate::render::renderable::Renderable;
- use crate::session_state::ThreadSessionState;
- use crate::style::proposed_plan_style;
- use crate::style::user_message_style;
+@@ -37,6 +37,7 @@ use crate::terminal_hyperlinks::mark_buffer_hyperlinks;
+ use crate::terminal_hyperlinks::plain_hyperlink_lines;
+ use crate::terminal_hyperlinks::prefix_hyperlink_lines;
+ use crate::terminal_hyperlinks::visible_lines;
 +use crate::terminal_palette::use_ascii_ui;
  #[cfg(test)]
  use crate::test_support::PathBufExt;
@@ -248,10 +248,10 @@ index 23e8836..b65e0d5 100644
      out
  }
 diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
-index 34065b7..e66a71f 100644
+index 508977f..fe5cdfa 100644
 --- a/codex-rs/tui/src/lib.rs
 +++ b/codex-rs/tui/src/lib.rs
-@@ -1317,7 +1317,16 @@ async fn run_ratatui_app(
+@@ -1324,7 +1324,16 @@ async fn run_ratatui_app(
          prev_hook(info);
      }));
      let mut initialized_terminal = tui::init()?;
@@ -370,7 +370,7 @@ index 53c68d9..331b83d 100644
  mod imp {
      use super::DefaultColors;
 diff --git a/codex-rs/tui/src/tui.rs b/codex-rs/tui/src/tui.rs
-index ef2f1b0..6d6e40c 100644
+index b9055f5..0075a4c 100644
 --- a/codex-rs/tui/src/tui.rs
 +++ b/codex-rs/tui/src/tui.rs
 @@ -16,9 +16,13 @@ use std::time::Duration;
@@ -397,7 +397,7 @@ index ef2f1b0..6d6e40c 100644
  use tokio::sync::broadcast;
  use tokio_stream::Stream;
 
-@@ -171,18 +177,23 @@ mod tests {
+@@ -173,18 +179,23 @@ mod tests {
  pub fn set_modes() -> Result<()> {
      ensure_virtual_terminal_processing()?;
 
@@ -432,7 +432,7 @@ index ef2f1b0..6d6e40c 100644
      Ok(())
  }
 
-@@ -246,14 +257,20 @@ fn restore_common(
+@@ -248,14 +259,20 @@ fn restore_common(
  ) -> Result<()> {
      let mut first_error = ensure_virtual_terminal_processing().err();
 
@@ -453,7 +453,7 @@ index ef2f1b0..6d6e40c 100644
      let _ = execute!(stdout(), DisableFocusChange);
      if matches!(raw_mode_restore, RawModeRestore::Disable)
          && let Err(err) = disable_raw_mode()
-@@ -373,7 +390,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
+@@ -375,7 +392,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
      #[cfg(unix)]
      let backend = CrosstermBackend::new(stdout());
 
@@ -462,7 +462,7 @@ index ef2f1b0..6d6e40c 100644
      let startup_probe = {
          use crate::terminal_probe::StartupKeyboardEnhancementProbe;
 
-@@ -409,6 +426,13 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
+@@ -411,6 +428,13 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
          }
      };
 
@@ -476,7 +476,7 @@ index ef2f1b0..6d6e40c 100644
      #[cfg(unix)]
      crate::terminal_palette::set_default_colors_from_startup_probe(startup_probe.default_colors);
 
-@@ -514,6 +538,14 @@ struct PendingHistoryLines {
+@@ -516,6 +540,14 @@ struct PendingHistoryLines {
      wrap_policy: HistoryLineWrapPolicy,
  }
 
@@ -491,7 +491,7 @@ index ef2f1b0..6d6e40c 100644
  fn clear_for_viewport_change<B>(terminal: &mut CustomTerminal<B>, new_area: Rect) -> Result<()>
  where
      B: Backend + Write,
-@@ -557,14 +589,14 @@ impl Tui {
+@@ -559,14 +591,14 @@ impl Tui {
              notification_backend: Some(detect_backend(NotificationMethod::default())),
              notification_condition: NotificationCondition::default(),
              is_zellij,
@@ -508,7 +508,7 @@ index ef2f1b0..6d6e40c 100644
      }
 
      pub fn set_notification_settings(
-@@ -839,46 +871,49 @@ impl Tui {
+@@ -852,18 +884,21 @@ impl Tui {
 
          // Precompute any viewport updates that need a cursor-position query before entering
          // the synchronized update, to avoid racing with the event reader.
@@ -532,35 +532,7 @@ index ef2f1b0..6d6e40c 100644
                  terminal.set_viewport_area(new_area);
                  terminal.clear()?;
              }
-
-             let size = terminal.size()?;
-
-             let mut area = terminal.viewport_area;
-             area.height = height.min(size.height);
-             area.width = size.width;
-             // If the viewport has expanded, scroll everything else up to make room.
-             if area.bottom() > size.height {
-                 terminal
-                     .backend_mut()
-                     .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
-                 area.y = size.height - area.height;
-             }
-             if area != terminal.viewport_area {
-                 // On startup, the old viewport can still be empty. Clear from the
-                 // new viewport top so stale shell cells do not show through spaces.
-                 clear_for_viewport_change(terminal, area)?;
-                 terminal.set_viewport_area(area);
-             }
- 
-             Self::flush_pending_history_lines(
-                 terminal,
-                 &mut self.pending_history_lines,
-                 self.is_zellij,
-             )?;
-
-             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.
-             #[cfg(unix)]
-@@ -897,7 +932,13 @@ impl Tui {
+@@ -910,7 +945,13 @@ impl Tui {
              terminal.draw(|frame| {
                  draw_fn(frame);
              })
@@ -575,7 +547,7 @@ index ef2f1b0..6d6e40c 100644
      }
 
      pub fn draw_ambient_pet_image(
-@@ -1009,12 +1050,18 @@ impl Tui {
+@@ -1022,12 +1063,18 @@ impl Tui {
              }
 
              terminal.draw(|frame| {

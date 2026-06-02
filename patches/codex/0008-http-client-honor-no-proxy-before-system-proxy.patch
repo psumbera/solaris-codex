@@ -13,16 +13,17 @@ This was offered to upstream via:
 https://github.com/openai/codex/issues/4242
 
 diff --git a/codex-rs/exec-server/src/client/reqwest_http_client.rs b/codex-rs/exec-server/src/client/reqwest_http_client.rs
+index 9e22fc0..1862197 100644
 --- a/codex-rs/exec-server/src/client/reqwest_http_client.rs
 +++ b/codex-rs/exec-server/src/client/reqwest_http_client.rs
-@@ -45,17 +45,23 @@ pub(crate) struct PendingReqwestHttpBodyStream {
+@@ -46,17 +46,23 @@ pub(crate) struct PendingReqwestHttpBodyStream {
  /// Validates `http/request` parameters and runs the actual `reqwest` call used
  /// by the exec-server route and the local [`HttpClient`] backend.
  pub(crate) struct ReqwestHttpRequestRunner {
 -    client: reqwest::Client,
 +    timeout_ms: Option<u64>,
  }
- 
+
  impl ReqwestHttpClient {
 -    fn build_client(timeout_ms: Option<u64>) -> Result<reqwest::Client, ExecServerError> {
 -        let builder = match timeout_ms {
@@ -42,8 +43,8 @@ diff --git a/codex-rs/exec-server/src/client/reqwest_http_client.rs b/codex-rs/e
          build_reqwest_client_with_custom_ca(builder)
              .map_err(|error| ExecServerError::HttpRequest(error.to_string()))
      }
-@@ -111,9 +117,7 @@ impl HttpClient for ReqwestHttpClient {
- 
+@@ -112,9 +118,7 @@ impl HttpClient for ReqwestHttpClient {
+
  impl ReqwestHttpRequestRunner {
      pub(crate) fn new(timeout_ms: Option<u64>) -> Result<Self, JSONRPCErrorError> {
 -        let client = ReqwestHttpClient::build_client(timeout_ms)
@@ -51,20 +52,22 @@ diff --git a/codex-rs/exec-server/src/client/reqwest_http_client.rs b/codex-rs/e
 -        Ok(Self { client })
 +        Ok(Self { timeout_ms })
      }
- 
+
      pub(crate) async fn run(
-@@ -137,5 +141,7 @@ impl ReqwestHttpRequestRunner {
+@@ -136,7 +140,9 @@ impl ReqwestHttpRequestRunner {
+         }
+
          let headers = Self::build_headers(params.headers)?;
--        let mut request = self.client.request(method, url).headers(headers);
+-        let mut request = self.client.request(method.clone(), url).headers(headers);
 +        let client = ReqwestHttpClient::build_client(self.timeout_ms, &url)
 +            .map_err(|error| internal_error(error.to_string()))?;
-+        let mut request = client.request(method, url).headers(headers);
++        let mut request = client.request(method.clone(), url).headers(headers);
          if let Some(body) = params.body {
              request = request.body(body.into_inner());
          }
-@@ -265,3 +271,98 @@ impl ReqwestHttpRequestRunner {
-             .collect()
+@@ -295,3 +301,98 @@ fn error_source_chain(error: &reqwest::Error) -> Option<String> {
      }
+     (!sources.is_empty()).then(|| sources.join(": "))
  }
 +
 +fn request_matches_no_proxy(url: &Url) -> bool {
