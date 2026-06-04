@@ -17,16 +17,16 @@ index f5f4fc5..1742d25 100644
 @@ -571,7 +571,7 @@ enum EmptyPidReservation {
      Record(PidRecord),
  }
-
+ 
 -#[cfg(unix)]
 +#[cfg(all(unix, not(target_os = "solaris")))]
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
-
+ 
 @@ -587,6 +587,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
      Err(err).context("failed to lock pid reservation")
  }
-
+ 
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;
@@ -66,16 +66,16 @@ index 354c08e..0357ca5 100644
 @@ -813,7 +813,7 @@ fn should_reexec_updater(
          && outcome == RestartIfRunningOutcome::Restarted
  }
-
+ 
 -#[cfg(unix)]
 +#[cfg(all(unix, not(target_os = "solaris")))]
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
-
+ 
 @@ -829,6 +829,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      Err(err).context("failed to lock daemon operation")
  }
-
+ 
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;

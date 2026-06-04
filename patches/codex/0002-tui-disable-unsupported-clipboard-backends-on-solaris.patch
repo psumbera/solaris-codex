@@ -11,7 +11,7 @@ Why it is needed:
   at runtime when clipboard actions are attempted on Solaris
 
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index ffc5c5a..f8c345a 100644
+index 581f67b..a8ce06f 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
 @@ -144,9 +144,9 @@ windows-sys = { version = "0.52", features = [
@@ -57,7 +57,7 @@ index 1ad369d..8781d42 100644
  #[cfg(target_os = "linux")]
  fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
 diff --git a/codex-rs/tui/src/clipboard_paste.rs b/codex-rs/tui/src/clipboard_paste.rs
-index 4d28b36..a2473bf 100644
+index 55ca6ca..fc7754c 100644
 --- a/codex-rs/tui/src/clipboard_paste.rs
 +++ b/codex-rs/tui/src/clipboard_paste.rs
 @@ -1,5 +1,6 @@
@@ -93,8 +93,8 @@ index 4d28b36..a2473bf 100644
  pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
      // First attempt: read image from system clipboard via arboard (native paths or image data).
      match paste_image_as_png() {
-@@ -236,6 +244,13 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
-     ))
+@@ -242,6 +250,13 @@ pub(crate) fn normalize_pasted_search_query(pasted: &str) -> Option<String> {
+     (!normalized.is_empty()).then_some(normalized)
  }
  
 +#[cfg(target_os = "solaris")]

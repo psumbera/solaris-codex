@@ -8,9 +8,25 @@ Show a conservative "Thinking" status for reasoning item starts and plain
 reasoning deltas, while keeping the existing richer header replacement when a
 bold header later arrives.
 
+diff --git a/codex-rs/tui/src/chatwidget/protocol.rs b/codex-rs/tui/src/chatwidget/protocol.rs
+index 6d56330..367c5f1 100644
+--- a/codex-rs/tui/src/chatwidget/protocol.rs
++++ b/codex-rs/tui/src/chatwidget/protocol.rs
+@@ -311,6 +311,9 @@ impl ChatWidget {
+             ThreadItem::ImageGeneration { .. } => {
+                 self.on_image_generation_begin();
+             }
++            ThreadItem::Reasoning { .. } if !from_replay => {
++                self.on_agent_reasoning_started();
++            }
+             ThreadItem::CollabAgentToolCall {
+                 id,
+                 tool,
+diff --git a/codex-rs/tui/src/chatwidget/streaming.rs b/codex-rs/tui/src/chatwidget/streaming.rs
+index 3dd9f26..935f88e 100644
 --- a/codex-rs/tui/src/chatwidget/streaming.rs
 +++ b/codex-rs/tui/src/chatwidget/streaming.rs
-@@ -10,12 +10,35 @@
+@@ -10,12 +10,35 @@ impl ChatWidget {
          if let Some(header) = extract_first_bold(&self.reasoning_buffer) {
              self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
              self.set_status_header(header);
@@ -46,7 +62,7 @@ bold header later arrives.
      pub(super) fn flush_answer_stream_with_separator(&mut self) {
          let had_stream_controller = self.stream_controller.is_some();
          if let Some(mut controller) = self.stream_controller.take() {
-@@ -203,7 +226,9 @@
+@@ -206,7 +229,9 @@ impl ChatWidget {
              self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
              self.set_status_header(header);
          } else {
@@ -57,21 +73,11 @@ bold header later arrives.
          }
          self.request_redraw();
      }
---- a/codex-rs/tui/src/chatwidget/protocol.rs
-+++ b/codex-rs/tui/src/chatwidget/protocol.rs
-@@ -311,6 +311,9 @@
-             ThreadItem::ImageGeneration { .. } => {
-                 self.on_image_generation_begin();
-             }
-+            ThreadItem::Reasoning { .. } if !from_replay => {
-+                self.on_agent_reasoning_started();
-+            }
-             ThreadItem::CollabAgentToolCall {
-                 id,
-                 tool,
+diff --git a/codex-rs/tui/src/chatwidget/tests/helpers.rs b/codex-rs/tui/src/chatwidget/tests/helpers.rs
+index cfc9278..990700e 100644
 --- a/codex-rs/tui/src/chatwidget/tests/helpers.rs
 +++ b/codex-rs/tui/src/chatwidget/tests/helpers.rs
-@@ -522,6 +522,26 @@
+@@ -523,6 +523,26 @@ pub(super) fn handle_agent_reasoning_delta(chat: &mut ChatWidget, delta: impl In
      );
  }
  
@@ -98,12 +104,15 @@ bold header later arrives.
  pub(super) fn handle_agent_reasoning_final(chat: &mut ChatWidget) {
      chat.handle_server_notification(
          ServerNotification::ItemCompleted(ItemCompletedNotification {
+diff --git a/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs b/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs
+index 3d08daa..d9ebc1d 100644
 --- a/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs
 +++ b/codex-rs/tui/src/chatwidget/tests/status_and_layout.rs
-@@ -1580,6 +1580,32 @@
+@@ -1628,6 +1628,32 @@ async fn ui_snapshots_small_heights_task_running() {
+     }
  }
  
- #[tokio::test]
++#[tokio::test]
 +async fn reasoning_delta_without_bold_header_sets_thinking_status() {
 +    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 +
@@ -129,7 +138,6 @@ bold header later arrives.
 +    );
 +}
 +
-+#[tokio::test]
+ #[tokio::test]
  #[serial]
  async fn ambient_pet_stays_hidden_until_a_pet_is_selected() {
-     use ratatui::layout::Rect;

@@ -12,7 +12,7 @@ Why it is needed:
   `cannot find value AI_CANONNAME in crate libc`
 
 diff --git a/codex-rs/config/src/host_name.rs b/codex-rs/config/src/host_name.rs
-index dcd34b0ba384516f23823d16503382f99de974e6..b7f9936b8cbdb6479f1cb7ae6fc5c71f1218aa7b 100644
+index dcd34b0..b7f9936 100644
 --- a/codex-rs/config/src/host_name.rs
 +++ b/codex-rs/config/src/host_name.rs
 @@ -10,6 +10,11 @@ use winapi_util::sysinfo::get_computer_name;

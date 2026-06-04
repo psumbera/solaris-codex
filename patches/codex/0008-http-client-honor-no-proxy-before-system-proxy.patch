@@ -23,7 +23,7 @@ index 9e22fc0..1862197 100644
 -    client: reqwest::Client,
 +    timeout_ms: Option<u64>,
  }
-
+ 
  impl ReqwestHttpClient {
 -    fn build_client(timeout_ms: Option<u64>) -> Result<reqwest::Client, ExecServerError> {
 -        let builder = match timeout_ms {
@@ -44,7 +44,7 @@ index 9e22fc0..1862197 100644
              .map_err(|error| ExecServerError::HttpRequest(error.to_string()))
      }
 @@ -112,9 +118,7 @@ impl HttpClient for ReqwestHttpClient {
-
+ 
  impl ReqwestHttpRequestRunner {
      pub(crate) fn new(timeout_ms: Option<u64>) -> Result<Self, JSONRPCErrorError> {
 -        let client = ReqwestHttpClient::build_client(timeout_ms)
@@ -52,11 +52,11 @@ index 9e22fc0..1862197 100644
 -        Ok(Self { client })
 +        Ok(Self { timeout_ms })
      }
-
+ 
      pub(crate) async fn run(
 @@ -136,7 +140,9 @@ impl ReqwestHttpRequestRunner {
          }
-
+ 
          let headers = Self::build_headers(params.headers)?;
 -        let mut request = self.client.request(method.clone(), url).headers(headers);
 +        let client = ReqwestHttpClient::build_client(self.timeout_ms, &url)

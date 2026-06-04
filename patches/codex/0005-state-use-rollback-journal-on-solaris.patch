@@ -42,7 +42,7 @@ index b08545d..015d224 100644
 @@ -302,11 +308,90 @@ impl StateRuntime {
      }
  }
-
+ 
 +fn default_sqlite_journal_mode() -> SqliteJournalMode {
 +    if cfg!(target_os = "solaris") {
 +        SqliteJournalMode::Delete
