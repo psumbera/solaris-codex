@@ -344,6 +344,533 @@ checksum_json.write_text(json.dumps(data, separators=(",", ":")))
 PY2
 }
 
+patch_tui_solaris_terminal_input() {
+  local tui_rs=${CODEX_SRC_DIR}/tui/src/tui.rs
+  local event_stream_rs=${CODEX_SRC_DIR}/tui/src/tui/event_stream.rs
+
+  python3 - "${tui_rs}" "${event_stream_rs}" <<'PY'
+from pathlib import Path
+import sys
+
+tui_rs = Path(sys.argv[1])
+text = tui_rs.read_text()
+
+old = """use crossterm::event::DisableBracketedPaste;
+use crossterm::event::DisableFocusChange;
+use crossterm::event::EnableBracketedPaste;
+use crossterm::event::EnableFocusChange;
+"""
+new = """#[cfg(not(target_os = \"solaris\"))]
+use crossterm::event::DisableBracketedPaste;
+#[cfg(not(target_os = \"solaris\"))]
+use crossterm::event::DisableFocusChange;
+#[cfg(not(target_os = \"solaris\"))]
+use crossterm::event::EnableBracketedPaste;
+#[cfg(not(target_os = \"solaris\"))]
+use crossterm::event::EnableFocusChange;
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch tui.rs crossterm mode imports")
+    text = text.replace(old, new, 1)
+
+old = """pub fn set_modes() -> Result<()> {
+    ensure_virtual_terminal_processing()?;
+
+    execute!(stdout(), EnableBracketedPaste)?;
+
+    enable_raw_mode()?;
+    // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
+    // chat_composer.rs is using a keyboard event listener to enter for any modified keys
+    // to create a new line that require this.
+    // Some terminals (notably legacy Windows consoles) do not support
+    // keyboard enhancement flags. Attempt to enable them, but continue
+    // gracefully if unsupported.
+    keyboard_modes::enable_keyboard_enhancement();
+
+    let _ = execute!(stdout(), EnableFocusChange);
+    Ok(())
+}
+"""
+new = """pub fn set_modes() -> Result<()> {
+    ensure_virtual_terminal_processing()?;
+
+    enable_raw_mode()?;
+
+    #[cfg(not(target_os = \"solaris\"))]
+    {
+        execute!(stdout(), EnableBracketedPaste)?;
+
+        // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
+        // chat_composer.rs is using a keyboard event listener to enter for any modified keys
+        // to create a new line that require this.
+        // Some terminals (notably legacy Windows consoles) do not support
+        // keyboard enhancement flags. Attempt to enable them, but continue
+        // gracefully if unsupported.
+        keyboard_modes::enable_keyboard_enhancement();
+
+        let _ = execute!(stdout(), EnableFocusChange);
+    }
+
+    Ok(())
+}
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch tui.rs set_modes")
+    text = text.replace(old, new, 1)
+
+old = """    match keyboard_restore {
+        KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(),
+        KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
+    }
+
+    if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
+        first_error.get_or_insert(err);
+    }
+    let _ = execute!(stdout(), DisableFocusChange);
+"""
+new = """    #[cfg(target_os = \"solaris\")]
+    let _ = keyboard_restore;
+
+    #[cfg(not(target_os = \"solaris\"))]
+    match keyboard_restore {
+        KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(),
+        KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
+    }
+
+    #[cfg(not(target_os = \"solaris\"))]
+    if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
+        first_error.get_or_insert(err);
+    }
+    #[cfg(not(target_os = \"solaris\"))]
+    let _ = execute!(stdout(), DisableFocusChange);
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch tui.rs restore_common")
+    text = text.replace(old, new, 1)
+
+old = """    #[cfg(unix)]
+    let startup_probe = {
+        use crate::terminal_probe::StartupKeyboardEnhancementProbe;
+
+        let started_at = std::time::Instant::now();
+        let keyboard_probe = if keyboard_modes::keyboard_enhancement_disabled() {
+            StartupKeyboardEnhancementProbe::Skip
+        } else {
+            StartupKeyboardEnhancementProbe::Query
+        };
+        match crate::terminal_probe::startup(crate::terminal_probe::DEFAULT_TIMEOUT, keyboard_probe)
+        {
+            Ok(probe) => {
+                tracing::info!(
+                    duration_ms = %started_at.elapsed().as_millis(),
+                    cursor_position = probe.cursor_position.is_some(),
+                    default_colors = probe.default_colors.is_some(),
+                    keyboard_enhancement_supported = ?probe.keyboard_enhancement_supported,
+                    \"terminal startup probes completed\"
+                );
+                probe
+            }
+            Err(err) => {
+                tracing::warn!(
+                    duration_ms = %started_at.elapsed().as_millis(),
+                    \"terminal startup probes failed: {err}\"
+                );
+                crate::terminal_probe::StartupProbe {
+                    cursor_position: None,
+                    default_colors: None,
+                    keyboard_enhancement_supported: None,
+                }
+            }
+        }
+    };
+"""
+new = """    #[cfg(all(unix, not(target_os = \"solaris\")))]
+    let startup_probe = {
+        use crate::terminal_probe::StartupKeyboardEnhancementProbe;
+
+        let started_at = std::time::Instant::now();
+        let keyboard_probe = if keyboard_modes::keyboard_enhancement_disabled() {
+            StartupKeyboardEnhancementProbe::Skip
+        } else {
+            StartupKeyboardEnhancementProbe::Query
+        };
+        match crate::terminal_probe::startup(crate::terminal_probe::DEFAULT_TIMEOUT, keyboard_probe)
+        {
+            Ok(probe) => {
+                tracing::info!(
+                    duration_ms = %started_at.elapsed().as_millis(),
+                    cursor_position = probe.cursor_position.is_some(),
+                    default_colors = probe.default_colors.is_some(),
+                    keyboard_enhancement_supported = ?probe.keyboard_enhancement_supported,
+                    \"terminal startup probes completed\"
+                );
+                probe
+            }
+            Err(err) => {
+                tracing::warn!(
+                    duration_ms = %started_at.elapsed().as_millis(),
+                    \"terminal startup probes failed: {err}\"
+                );
+                crate::terminal_probe::StartupProbe {
+                    cursor_position: None,
+                    default_colors: None,
+                    keyboard_enhancement_supported: None,
+                }
+            }
+        }
+    };
+
+    #[cfg(all(unix, target_os = \"solaris\"))]
+    let startup_probe = crate::terminal_probe::StartupProbe {
+        cursor_position: None,
+        default_colors: None,
+        keyboard_enhancement_supported: None,
+    };
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch tui.rs startup probes")
+    text = text.replace(old, new, 1)
+
+tui_rs.write_text(text)
+
+event_stream_rs = Path(sys.argv[2])
+text = event_stream_rs.read_text()
+
+old = """use std::task::Context;
+use std::task::Poll;
+
+use crossterm::event::Event;
+use tokio::sync::broadcast;
+"""
+new = """use std::task::Context;
+use std::task::Poll;
+#[cfg(target_os = \"solaris\")]
+use std::time::Duration;
+
+use crossterm::event::Event;
+#[cfg(target_os = \"solaris\")]
+use crossterm::event::KeyCode;
+#[cfg(target_os = \"solaris\")]
+use crossterm::event::KeyEvent;
+#[cfg(target_os = \"solaris\")]
+use crossterm::event::KeyEventKind;
+#[cfg(target_os = \"solaris\")]
+use crossterm::event::KeyModifiers;
+use tokio::sync::broadcast;
+#[cfg(target_os = \"solaris\")]
+use tokio::sync::mpsc;
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch event_stream.rs imports")
+    text = text.replace(old, new, 1)
+
+old = """/// Real crossterm-backed event source.
+pub struct CrosstermEventSource(pub crossterm::event::EventStream);
+
+impl Default for CrosstermEventSource {
+    fn default() -> Self {
+        Self(crossterm::event::EventStream::new())
+    }
+}
+
+impl EventSource for CrosstermEventSource {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
+        Pin::new(&mut self.get_mut().0).poll_next(cx)
+    }
+}
+"""
+new = """/// Real crossterm-backed event source.
+#[cfg(not(target_os = \"solaris\"))]
+pub struct CrosstermEventSource(pub crossterm::event::EventStream);
+
+#[cfg(not(target_os = \"solaris\"))]
+impl Default for CrosstermEventSource {
+    fn default() -> Self {
+        Self(crossterm::event::EventStream::new())
+    }
+}
+
+#[cfg(not(target_os = \"solaris\"))]
+impl EventSource for CrosstermEventSource {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
+        Pin::new(&mut self.get_mut().0).poll_next(cx)
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+pub struct CrosstermEventSource {
+    rx: mpsc::UnboundedReceiver<EventResult>,
+    running: Arc<AtomicBool>,
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_poll_stdin(timeout: Duration) -> std::io::Result<bool> {
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    let mut pollfd = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let rc = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
+    if rc < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(rc > 0 && (pollfd.revents & libc::POLLIN) != 0)
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_read_stdin(buf: &mut [u8]) -> std::io::Result<usize> {
+    let rc = unsafe { libc::read(libc::STDIN_FILENO, buf.as_mut_ptr().cast(), buf.len()) };
+    if rc < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(rc as usize)
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_utf8_char_width(byte: u8) -> usize {
+    match byte {
+        0x00..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf7 => 4,
+        _ => 0,
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_key(code: KeyCode, modifiers: KeyModifiers) -> Event {
+    Event::Key(KeyEvent::new(code, modifiers))
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_parse_plain_key(bytes: &[u8]) -> Option<(Event, usize)> {
+    let first = *bytes.first()?;
+    match first {
+        b'\\r' | b'\\n' => return Some((solaris_key(KeyCode::Enter, KeyModifiers::NONE), 1)),
+        b'\\t' => return Some((solaris_key(KeyCode::Tab, KeyModifiers::NONE), 1)),
+        0x7f | 0x08 => return Some((solaris_key(KeyCode::Backspace, KeyModifiers::NONE), 1)),
+        0x01..=0x1a => {
+            let ch = (b'a' + (first - 1)) as char;
+            return Some((solaris_key(KeyCode::Char(ch), KeyModifiers::CONTROL), 1));
+        }
+        0x1c => return Some((solaris_key(KeyCode::Char('4'), KeyModifiers::CONTROL), 1)),
+        0x1d => return Some((solaris_key(KeyCode::Char('5'), KeyModifiers::CONTROL), 1)),
+        0x1e => return Some((solaris_key(KeyCode::Char('6'), KeyModifiers::CONTROL), 1)),
+        0x1f => return Some((solaris_key(KeyCode::Char('7'), KeyModifiers::CONTROL), 1)),
+        0x20..=0x7e => {
+            return Some((solaris_key(KeyCode::Char(first as char), KeyModifiers::NONE), 1));
+        }
+        _ => {}
+    }
+
+    let width = solaris_utf8_char_width(first);
+    if width == 0 || bytes.len() < width {
+        return None;
+    }
+    let slice = &bytes[..width];
+    let s = std::str::from_utf8(slice).ok()?;
+    let ch = s.chars().next()?;
+    Some((solaris_key(KeyCode::Char(ch), KeyModifiers::NONE), width))
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_apply_alt(event: Event) -> Event {
+    match event {
+        Event::Key(key) => Event::Key(KeyEvent::new(key.code, key.modifiers | KeyModifiers::ALT)),
+        other => other,
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_parse_escape(bytes: &[u8], flush_escape: bool) -> Option<(Event, usize)> {
+    if bytes.first().copied()? != 0x1b {
+        return None;
+    }
+    if bytes.len() == 1 {
+        return flush_escape.then(|| (solaris_key(KeyCode::Esc, KeyModifiers::NONE), 1));
+    }
+
+    if bytes[1] == b'[' || bytes[1] == b'O' {
+        for idx in 2..bytes.len() {
+            let final_byte = bytes[idx];
+            if !(0x40..=0x7e).contains(&final_byte) {
+                continue;
+            }
+            let params = std::str::from_utf8(&bytes[2..idx]).unwrap_or(\"\");
+            let event = match final_byte {
+                b'A' => solaris_key(KeyCode::Up, KeyModifiers::NONE),
+                b'B' => solaris_key(KeyCode::Down, KeyModifiers::NONE),
+                b'C' => solaris_key(KeyCode::Right, KeyModifiers::NONE),
+                b'D' => solaris_key(KeyCode::Left, KeyModifiers::NONE),
+                b'H' => solaris_key(KeyCode::Home, KeyModifiers::NONE),
+                b'F' => solaris_key(KeyCode::End, KeyModifiers::NONE),
+                b'Z' => solaris_key(KeyCode::BackTab, KeyModifiers::SHIFT),
+                b'~' => match params {
+                    \"1\" | \"7\" => solaris_key(KeyCode::Home, KeyModifiers::NONE),
+                    \"2\" => solaris_key(KeyCode::Insert, KeyModifiers::NONE),
+                    \"3\" => solaris_key(KeyCode::Delete, KeyModifiers::NONE),
+                    \"4\" | \"8\" => solaris_key(KeyCode::End, KeyModifiers::NONE),
+                    \"5\" => solaris_key(KeyCode::PageUp, KeyModifiers::NONE),
+                    \"6\" => solaris_key(KeyCode::PageDown, KeyModifiers::NONE),
+                    _ => solaris_key(KeyCode::Esc, KeyModifiers::NONE),
+                },
+                _ => solaris_key(KeyCode::Esc, KeyModifiers::NONE),
+            };
+            return Some((event, idx + 1));
+        }
+        return None;
+    }
+
+    solaris_parse_plain_key(&bytes[1..])
+        .map(|(event, consumed)| (solaris_apply_alt(event), consumed + 1))
+}
+
+#[cfg(target_os = \"solaris\")]
+fn solaris_parse_event(bytes: &[u8], flush_escape: bool) -> Option<(Event, usize)> {
+    match bytes.first().copied()? {
+        0x1b => solaris_parse_escape(bytes, flush_escape),
+        _ => solaris_parse_plain_key(bytes),
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+impl Default for CrosstermEventSource {
+    fn default() -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let running = Arc::new(AtomicBool::new(true));
+        let thread_running = Arc::clone(&running);
+
+        std::thread::Builder::new()
+            .name(\"solaris-stdin-input\".to_string())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let mut pending = Vec::new();
+                    let mut buf = [0u8; 64];
+                    while thread_running.load(Ordering::Relaxed) {
+                        match solaris_poll_stdin(Duration::from_millis(100)) {
+                            Ok(true) => match solaris_read_stdin(&mut buf) {
+                                Ok(0) => {}
+                                Ok(n) => {
+                                    pending.extend_from_slice(&buf[..n]);
+                                    while let Some((event, consumed)) =
+                                        solaris_parse_event(&pending, false)
+                                    {
+                                        if tx.send(Ok(event)).is_err() {
+                                            tracing::warn!(\"solaris input receiver dropped\");
+                                            return;
+                                        }
+                                        pending.drain(..consumed);
+                                    }
+                                }
+                                Err(err) => {
+                                    tracing::warn!(error = %err, \"solaris stdin read failed\");
+                                }
+                            },
+                            Ok(false) => {
+                                if let Some((event, consumed)) = solaris_parse_event(&pending, true)
+                                {
+                                    if tx.send(Ok(event)).is_err() {
+                                        tracing::warn!(\"solaris input receiver dropped\");
+                                        return;
+                                    }
+                                    pending.drain(..consumed);
+                                }
+                            }
+                            Err(err) => {
+                                tracing::warn!(error = %err, \"solaris stdin poll failed\");
+                            }
+                        }
+                    }
+                }));
+                if let Err(payload) = result {
+                    let panic_msg = if let Some(msg) = payload.downcast_ref::<&str>() {
+                        *msg
+                    } else if let Some(msg) = payload.downcast_ref::<String>() {
+                        msg.as_str()
+                    } else {
+                        \"unknown panic payload\"
+                    };
+                    tracing::error!(panic_msg, \"solaris stdin input thread panicked\");
+                }
+            })
+            .expect(\"failed to spawn solaris stdin input thread\");
+
+        Self { rx, running }
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+impl Drop for CrosstermEventSource {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+    }
+}
+
+#[cfg(target_os = \"solaris\")]
+impl EventSource for CrosstermEventSource {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
+        self.get_mut().rx.poll_recv(cx)
+    }
+}
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch event_stream.rs crossterm source")
+    text = text.replace(old, new, 1)
+
+old = """                    Poll::Ready(Some(Err(_))) | Poll::Ready(None) => {
+                        *state = EventBrokerState::Start;
+                        return Poll::Ready(None);
+                    }
+"""
+new = """                    Poll::Ready(Some(Err(err))) => {
+                        #[cfg(target_os = \"solaris\")]
+                        tracing::warn!(error = %err, \"resetting tui event source after read error\");
+                        *state = EventBrokerState::Start;
+                        continue;
+                    }
+                    Poll::Ready(None) => {
+                        #[cfg(target_os = \"solaris\")]
+                        tracing::warn!(\"resetting tui event source after unexpected EOF\");
+                        *state = EventBrokerState::Start;
+                        continue;
+                    }
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch event_stream.rs error handling")
+    text = text.replace(old, new, 1)
+
+old = """            Event::Key(key_event) => {
+                #[cfg(unix)]
+                if crate::tui::job_control::SUSPEND_KEY.is_press(key_event) {
+"""
+new = """            Event::Key(key_event) => {
+                #[cfg(target_os = \"solaris\")]
+                let key_event = crossterm::event::KeyEvent {
+                    kind: KeyEventKind::Press,
+                    ..key_event
+                };
+
+                #[cfg(unix)]
+                if crate::tui::job_control::SUSPEND_KEY.is_press(key_event) {
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch event_stream.rs solaris key kind")
+    text = text.replace(old, new, 1)
+
+event_stream_rs.write_text(text)
+PY
+}
+
 v8_install_matches_pin() {
   local stamp=${V8_INSTALL_DIR}/.source-ref
   local current=
@@ -407,6 +934,7 @@ v8_install_matches_pin || bash "${TOP}/build-v8.sh"
 
 ensure_codex_source
 apply_patch_series "${CODEX_REPO_DIR}" "${TOP}/patches/codex"
+patch_tui_solaris_terminal_input
 vendor_rust_sources "${CODEX_SRC_DIR}" "${CODEX_VENDOR_DIR}"
 
 # Apply the remaining Solaris vendored-crate rewrites after cargo vendor.

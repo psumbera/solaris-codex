@@ -9,8 +9,8 @@ Why it is needed:
 - without it, the C++ binding header fails to compile due to duplicate
   specialization logic
 
---- a/v8-147.4.0/third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2/bindings/cpp/temporal_rs/diplomat_runtime.hpp
-+++ b/v8-147.4.0/third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2/bindings/cpp/temporal_rs/diplomat_runtime.hpp
+--- a/v8-149.2.0/third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2/bindings/cpp/temporal_rs/diplomat_runtime.hpp
++++ b/v8-149.2.0/third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2/bindings/cpp/temporal_rs/diplomat_runtime.hpp
 @@ -392,1 +392,3 @@
 +#if !defined(__sun)
  MAKE_SLICE_CONVERTERS(String, char)

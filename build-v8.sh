@@ -216,6 +216,155 @@ p.write_text(text)
 PY
 }
 
+patch_rust_custom_sysroot_inputs() {
+  local rust_gni=${V8_SRC_DIR}/build/config/rust.gni
+  local std_build=${V8_SRC_DIR}/build/rust/std/BUILD.gn
+  local cargo_crate_gni=${V8_SRC_DIR}/build/rust/cargo_crate.gni
+
+  python3 - "${rust_gni}" "${std_build}" "${cargo_crate_gni}" <<'PY'
+from pathlib import Path
+import sys
+
+rust_gni = Path(sys.argv[1])
+text = rust_gni.read_text()
+old = """if (host_os == "win") {
+  rustc_wrapper_inputs += [ "//third_party/rust-toolchain/bin/rustc.exe" ]
+} else {
+  rustc_wrapper_inputs += [ "//third_party/rust-toolchain/bin/rustc" ]
+}
+"""
+new = """if (host_os == "win") {
+  rustc_wrapper_inputs += [ "${rust_sysroot}/bin/rustc.exe" ]
+} else {
+  rustc_wrapper_inputs += [ "${rust_sysroot}/bin/rustc" ]
+}
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch rust.gni rustc_wrapper_inputs")
+    text = text.replace(old, new, 1)
+    rust_gni.write_text(text)
+
+std_build = Path(sys.argv[2])
+text = std_build.read_text()
+old = """      if (host_os == "win") {
+        inputs = [ "//third_party/rust-toolchain/bin/rustc.exe" ]
+      } else {
+        inputs = [ "//third_party/rust-toolchain/bin/rustc" ]
+      }
+"""
+new = """      if (host_os == "win") {
+        inputs = [ "${rust_sysroot}/bin/rustc.exe" ]
+      } else {
+        inputs = [ "${rust_sysroot}/bin/rustc" ]
+      }
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch std BUILD.gn rustc input")
+    text = text.replace(old, new, 1)
+    std_build.write_text(text)
+
+cargo_crate_gni = Path(sys.argv[3])
+text = cargo_crate_gni.read_text()
+old = """      if (host_os == "win") {
+        inputs += [ "//third_party/rust-toolchain/bin/rustc.exe" ]
+      } else {
+        inputs += [ "//third_party/rust-toolchain/bin/rustc" ]
+      }
+"""
+new = """      if (host_os == "win") {
+        inputs += [ "${rust_sysroot}/bin/rustc.exe" ]
+      } else {
+        inputs += [ "${rust_sysroot}/bin/rustc" ]
+      }
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch cargo_crate.gni rustc input")
+    text = text.replace(old, new, 1)
+    cargo_crate_gni.write_text(text)
+PY
+}
+
+patch_v8_has_warning_fallback() {
+  local macros_h=${V8_SRC_DIR}/v8/src/base/macros.h
+
+  python3 - "${macros_h}" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+insert = """#if !defined(__has_warning)
+#define __has_warning(x) 0
+#endif
+
+"""
+marker = "#define V8_BASE_MACROS_H_\n\n"
+if insert not in text:
+    if marker not in text:
+        raise SystemExit("failed to patch macros.h __has_warning fallback")
+    text = text.replace(marker, marker + insert, 1)
+    p.write_text(text)
+PY
+}
+
+patch_disable_solaris_thin_archives() {
+  local compiler_build=${V8_SRC_DIR}/build/config/compiler/BUILD.gn
+
+  python3 - "${compiler_build}" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+old = """config("thin_archive") {
+  if ((is_apple && use_lld) || (is_linux && !is_clang) || current_os == "aix" ||
+      current_os == "zos") {
+"""
+new = """config("thin_archive") {
+  if ((is_apple && use_lld) ||
+      (is_linux && target_os != "solaris" && !is_clang) ||
+      current_os == "aix" || current_os == "zos") {
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch first thin_archive branch")
+    text = text.replace(old, new, 1)
+
+old = """  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
+"""
+new = """  } else if ((is_posix && target_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch second thin_archive branch")
+    text = text.replace(old, new, 1)
+
+p.write_text(text)
+PY
+}
+
+patch_v8_managed_inline_include() {
+  local constant_expression=${V8_SRC_DIR}/v8/src/wasm/constant-expression-interface.cc
+
+  python3 - "${constant_expression}" <<'PY'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+text = p.read_text()
+include = '#include "src/objects/managed-inl.h"\n'
+marker = '#include "src/objects/map-inl.h"\n'
+if include not in text:
+    if marker not in text:
+        raise SystemExit("failed to patch constant-expression-interface.cc managed include")
+    text = text.replace(marker, marker + include, 1)
+    p.write_text(text)
+PY
+}
+
 resolve_generated_src_binding() {
   local candidate
 
@@ -269,6 +418,10 @@ patch_vendored_bindgen_var
 patch_rustc_wrapper
 patch_gcc_toolchain_ar
 patch_wrapper_utils
+patch_rust_custom_sysroot_inputs
+patch_v8_has_warning_fallback
+patch_disable_solaris_thin_archives
+patch_v8_managed_inline_include
 ensure_bindgen_root
 
 export GN="${GN_INSTALL_DIR}/bin/gn"
@@ -276,7 +429,7 @@ export V8_FROM_SOURCE=1
 export DISABLE_CLANG=1
 export RUSTC_BOOTSTRAP=1
 rustc_version=$("${RUSTC}" -V)
-export GN_ARGS="is_clang=false use_custom_libcxx=false use_custom_libcxx_for_host=false host_os=\"linux\" target_os=\"solaris\" rust_sysroot_absolute=\"${RUST_PREFIX}\" rustc_version=\"${rustc_version}\" rust_bindgen_root=\"${BINDGEN_ROOT_DIR}\" rust_abi_target_override=\"${RUST_TRIPLE}\" removed_rust_stdlib_libs=[\"adler\"] added_rust_stdlib_libs=[\"adler2\"] removed_rust_skip_stdlib_libs=[\"profiler_builtins\"] treat_warnings_as_errors=false fatal_linker_warnings=false"
+export GN_ARGS="is_clang=false use_custom_libcxx=false use_custom_libcxx_for_host=false host_os=\"linux\" target_os=\"solaris\" rust_sysroot_absolute=\"${RUST_PREFIX}\" rustc_version=\"${rustc_version}\" rust_bindgen_root=\"${BINDGEN_ROOT_DIR}\" rust_abi_target_override=\"${RUST_TRIPLE}\" removed_rust_skip_stdlib_libs=[\"profiler_builtins\"] treat_warnings_as_errors=false fatal_linker_warnings=false"
 
 log "Building v8-solaris"
 (

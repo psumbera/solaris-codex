@@ -10,8 +10,8 @@ Why it is needed:
 - without it, Chromium still expects removed stdlib artifacts that the Solaris
   wrapper intentionally excludes
 
---- a/v8-147.4.0/build/config/rust.gni
-+++ b/v8-147.4.0/build/config/rust.gni
+--- a/v8-149.2.0/build/config/rust.gni
++++ b/v8-149.2.0/build/config/rust.gni
 @@ -90,6 +90,10 @@
    # Rust toolchain. Typically used with 'rust_sysroot_absolute'
    removed_rust_stdlib_libs = []
@@ -23,8 +23,8 @@ Why it is needed:
    # Non-rlib libs provided in the toolchain sysroot. Usually this is empty, but
    # e.g. the Android Rust Toolchain provides a libunwind.a that rustc expects.
    extra_sysroot_libs = []
---- a/v8-147.4.0/build/rust/std/BUILD.gn
-+++ b/v8-147.4.0/build/rust/std/BUILD.gn
+--- a/v8-149.2.0/build/rust/std/BUILD.gn
++++ b/v8-149.2.0/build/rust/std/BUILD.gn
 @@ -83,6 +83,7 @@
      "rustc_std_workspace_core",
      "rustc_std_workspace_std",

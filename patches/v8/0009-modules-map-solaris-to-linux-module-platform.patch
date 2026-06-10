@@ -9,8 +9,8 @@ Why it is needed:
 - without it, the module platform name does not match the sysroot layout used
   by the Solaris wrapper build
 
---- a/v8-147.4.0/build/config/c++/modules.gni
-+++ b/v8-147.4.0/build/config/c++/modules.gni
+--- a/v8-149.2.0/build/config/c++/modules.gni
++++ b/v8-149.2.0/build/config/c++/modules.gni
 @@ -20,7 +20,7 @@
  }
  

@@ -9,8 +9,8 @@ Why it is needed:
 - without it, cross-checked GN conditions can still route Solaris targets into
   the wrong archive branch
 
---- a/v8-147.4.0/build/config/compiler/BUILD.gn
-+++ b/v8-147.4.0/build/config/compiler/BUILD.gn
+--- a/v8-149.2.0/build/config/compiler/BUILD.gn
++++ b/v8-149.2.0/build/config/compiler/BUILD.gn
 @@ -2608,7 +2608,7 @@
  # 2. Remove the thin_archive config, so that the .a file actually contains all
  #    .o files, instead of just references to .o files in the build directoy

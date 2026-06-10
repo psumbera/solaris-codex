@@ -9,8 +9,8 @@ Why it is needed:
 - without it, the V8 build selects the wrong source files for the Solaris
   platform layer
 
---- a/v8-147.4.0/v8/BUILD.gn
-+++ b/v8-147.4.0/v8/BUILD.gn
+--- a/v8-149.2.0/v8/BUILD.gn
++++ b/v8-149.2.0/v8/BUILD.gn
 @@ -7215,7 +7215,7 @@
        "src/base/platform/platform-posix.cc",
        "src/base/platform/platform-posix.h",
@@ -35,8 +35,8 @@ Why it is needed:
      sources += [
        "src/base/debug/stack_trace_posix.cc",
        "src/base/platform/platform-linux.cc",
---- a/v8-147.4.0/v8/src/base/platform/platform-posix.cc
-+++ b/v8-147.4.0/v8/src/base/platform/platform-posix.cc
+--- a/v8-149.2.0/v8/src/base/platform/platform-posix.cc
++++ b/v8-149.2.0/v8/src/base/platform/platform-posix.cc
 @@ -82,14 +82,6 @@
  #define MAP_ANONYMOUS MAP_ANON
  #endif

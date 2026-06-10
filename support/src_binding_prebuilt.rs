@@ -10,14 +10,6 @@ pub type cppgc_GarbageCollected_IsGarbageCollectedTypeMarker =
   ::std::os::raw::c_void;
 pub type cppgc_GarbageCollected_ParentMostGarbageCollectedType<T> = T;
 #[repr(C)]
-pub struct cppgc_Visitor__bindgen_vtable(::std::os::raw::c_void);
-#[doc = " Visitor passed to trace methods. All managed pointers must have called the\n Visitor's trace method on them.\n\n \\code\n class Foo final : public GarbageCollected<Foo> {\n  public:\n   void Trace(Visitor* visitor) const {\n     visitor->Trace(foo_);\n     visitor->Trace(weak_foo_);\n   }\n  private:\n   Member<Foo> foo_;\n   WeakMember<Foo> weak_foo_;\n };\n \\endcode"]
-#[repr(C)]
-#[derive(Debug)]
-pub struct cppgc_Visitor {
-  pub vtable_: *const cppgc_Visitor__bindgen_vtable,
-}
-#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct cppgc_Visitor_Key {
   pub _address: u8,
@@ -28,12 +20,6 @@ const _: () = {
     [::std::mem::size_of::<cppgc_Visitor_Key>() - 1usize];
   ["Alignment of cppgc_Visitor_Key"]
     [::std::mem::align_of::<cppgc_Visitor_Key>() - 1usize];
-};
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-  ["Size of cppgc_Visitor"][::std::mem::size_of::<cppgc_Visitor>() - 8usize];
-  ["Alignment of cppgc_Visitor"]
-    [::std::mem::align_of::<cppgc_Visitor>() - 8usize];
 };
 #[repr(C)]
 pub struct cppgc_NameProvider__bindgen_vtable(::std::os::raw::c_void);
@@ -803,8 +789,10 @@ pub enum v8_Isolate_UseCounterFeature {
   kWithStatement = 180,
   kHtmlWrapperMethods = 181,
   kWasmCustomDescriptors = 182,
-  kWasmResizableBuffers = 183,
-  kUseCounterFeatureCount = 184,
+  kOBSOLETE_WasmResizableBuffers = 183,
+  kInvalidatedArrayBufferMutableProtector = 184,
+  kHoleyArrayReadthrough = 185,
+  kUseCounterFeatureCount = 186,
 }
 #[repr(u32)]
 #[doc = " Interceptor callbacks use this value to indicate whether the request was\n intercepted or not.\n\n The values for constants and type are chosen this way for better\n performance."]
@@ -861,13 +849,6 @@ unsafe extern "C" {
   pub fn RustObj_RustObj_destructor(this: *mut RustObj);
 }
 unsafe extern "C" {
-  #[link_name = "\u{1}_ZNK7RustObj5TraceEPN5cppgc7VisitorE"]
-  pub fn RustObj_Trace(
-    this: *mut ::std::os::raw::c_void,
-    visitor: *mut cppgc_Visitor,
-  );
-}
-unsafe extern "C" {
   #[link_name = "\u{1}_ZNK7RustObj20GetHumanReadableNameEv"]
   pub fn RustObj_GetHumanReadableName(
     this: *mut ::std::os::raw::c_void,
@@ -914,10 +895,10 @@ pub use self::v8_GCType as v8__GCType;
 #[doc = " Interceptor callbacks use this value to indicate whether the request was\n intercepted or not.\n\n The values for constants and type are chosen this way for better\n performance."]
 pub use self::v8_Intercepted as v8__Intercepted;
 pub const v8__MAJOR_VERSION: u32 = 14;
-pub const v8__MINOR_VERSION: u32 = 7;
-pub const v8__BUILD_NUMBER: u32 = 173;
-pub const v8__PATCH_LEVEL: u32 = 20;
-pub const v8__VERSION_STRING: &::std::ffi::CStr = c"14.7.173.20-rusty";
+pub const v8__MINOR_VERSION: u32 = 9;
+pub const v8__BUILD_NUMBER: u32 = 207;
+pub const v8__PATCH_LEVEL: u32 = 2;
+pub const v8__VERSION_STRING: &::std::ffi::CStr = c"14.9.207.2-rusty";
 #[repr(C)]
 #[derive(Debug)]
 pub struct ExternalConstOneByteStringResource {

@@ -11,8 +11,8 @@ Why it is needed:
 - with `DISABLE_CLANG=1`, the V8 build can use the native Solaris GCC toolchain
   successfully, but bindgen still fails early on GCC-specific warning options
 
---- a/v8-147.4.0/build/rust/gni_impl/filter_clang_args.py
-+++ b/v8-147.4.0/build/rust/gni_impl/filter_clang_args.py
+--- a/v8-149.2.0/build/rust/gni_impl/filter_clang_args.py
++++ b/v8-149.2.0/build/rust/gni_impl/filter_clang_args.py
 @@ -12,6 +12,13 @@
  This function filters them out.
  """

@@ -10,8 +10,8 @@ Why it is needed:
 - without it, GN picks the wrong host toolchain branch for the Solaris wrapper
   build
 
---- a/v8-147.4.0/build/config/BUILDCONFIG.gn
-+++ b/v8-147.4.0/build/config/BUILDCONFIG.gn
+--- a/v8-149.2.0/build/config/BUILDCONFIG.gn
++++ b/v8-149.2.0/build/config/BUILDCONFIG.gn
 @@ -204,7 +204,7 @@
    # no toolchain omitted host_toolchain from its toolchain_args().
  
