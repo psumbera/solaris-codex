@@ -1,0 +1,141 @@
+The filesystem sandbox helper parent currently writes the helper request,
+closes stdin, and then waits for child output through wait_with_output(). On
+Solaris we have observed the helper process sleeping in write(1) with a large
+JSON response while the parent remains alive, which can wedge apply_patch and
+other filesystem helper requests.
+
+Start draining the helper stdout and stderr pipes before waiting for the child.
+This keeps large helper responses from filling the pipe and blocking the helper
+before it can exit. Add a regression test that returns a helper-shaped response
+larger than a typical pipe buffer.
+
+diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
+--- a/codex-rs/exec-server/src/fs_sandbox.rs
++++ b/codex-rs/exec-server/src/fs_sandbox.rs
+@@ -15,6 +15,7 @@
+ use codex_sandboxing::SandboxablePreference;
+ use codex_utils_absolute_path::AbsolutePathBuf;
+ use codex_utils_absolute_path::canonicalize_preserving_symlinks;
++use tokio::io::AsyncReadExt;
+ use tokio::io::AsyncWriteExt;
+ use tokio::process::Command;
+ 
+@@ -249,6 +250,25 @@
+     request_json: Vec<u8>,
+ ) -> Result<FsHelperPayload, JSONRPCErrorError> {
+     let mut child = spawn_command(command)?;
++    let mut stdout = child
++        .stdout
++        .take()
++        .ok_or_else(|| internal_error("failed to open fs sandbox helper stdout".to_string()))?;
++    let mut stderr = child
++        .stderr
++        .take()
++        .ok_or_else(|| internal_error("failed to open fs sandbox helper stderr".to_string()))?;
++    let stdout_task = tokio::spawn(async move {
++        let mut stdout_buf = Vec::new();
++        stdout.read_to_end(&mut stdout_buf).await?;
++        Ok::<_, std::io::Error>(stdout_buf)
++    });
++    let stderr_task = tokio::spawn(async move {
++        let mut stderr_buf = Vec::new();
++        stderr.read_to_end(&mut stderr_buf).await?;
++        Ok::<_, std::io::Error>(stderr_buf)
++    });
++
+     let mut stdin = child
+         .stdin
+         .take()
+@@ -257,15 +277,17 @@
+     stdin.shutdown().await.map_err(io_error)?;
+     drop(stdin);
+ 
+-    let output = child.wait_with_output().await.map_err(io_error)?;
+-    if !output.status.success() {
++    let status = child.wait().await.map_err(io_error)?;
++    let stdout = stdout_task.await.map_err(join_error)?.map_err(io_error)?;
++    let stderr = stderr_task.await.map_err(join_error)?.map_err(io_error)?;
++
++    if !status.success() {
+         return Err(internal_error(format!(
+             "fs sandbox helper failed with status {status}: {stderr}",
+-            status = output.status,
+-            stderr = String::from_utf8_lossy(&output.stderr).trim()
++            stderr = String::from_utf8_lossy(&stderr).trim()
+         )));
+     }
+-    let response: FsHelperResponse = serde_json::from_slice(&output.stdout).map_err(json_error)?;
++    let response: FsHelperResponse = serde_json::from_slice(&stdout).map_err(json_error)?;
+     match response {
+         FsHelperResponse::Ok(payload) => Ok(payload),
+         FsHelperResponse::Error(error) => Err(error),
+@@ -305,6 +327,10 @@
+     internal_error(err.to_string())
+ }
+ 
++fn join_error(err: tokio::task::JoinError) -> JSONRPCErrorError {
++    internal_error(err.to_string())
++}
++
+ fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
+     internal_error(format!(
+         "failed to encode or decode fs sandbox helper message: {err}"
+@@ -566,6 +592,58 @@
+         assert!(policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
+     }
+ 
++    #[cfg(unix)]
++    #[tokio::test]
++    async fn run_command_drains_large_helper_stdout_before_waiting() {
++        let large_data = "A".repeat(128 * 1024);
++        let response_json = serde_json::json!({
++            "status": "ok",
++            "payload": {
++                "operation": "fs/readFile",
++                "response": {
++                    "dataBase64": large_data,
++                },
++            },
++        })
++        .to_string();
++        let file_system_policy = FileSystemSandboxPolicy::unrestricted();
++        let network_policy = NetworkSandboxPolicy::Enabled;
++        let permission_profile =
++            PermissionProfile::from_runtime_permissions(&file_system_policy, network_policy);
++        let command = codex_sandboxing::SandboxExecRequest {
++            command: vec![
++                "/usr/bin/printf".to_string(),
++                "%s\n".to_string(),
++                response_json,
++            ],
++            cwd: AbsolutePathBuf::current_dir().expect("cwd"),
++            env: HashMap::new(),
++            network: None,
++            sandbox: codex_sandboxing::SandboxType::None,
++            windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel::Disabled,
++            windows_sandbox_private_desktop: false,
++            permission_profile,
++            file_system_sandbox_policy: file_system_policy,
++            network_sandbox_policy: network_policy,
++            arg0: None,
++        };
++
++        let payload = tokio::time::timeout(
++            std::time::Duration::from_secs(10),
++            super::run_command(command, Vec::new()),
++        )
++        .await
++        .expect("run_command should not hang")
++        .expect("helper command should succeed");
++
++        match payload {
++            crate::fs_helper::FsHelperPayload::ReadFile(response) => {
++                assert_eq!(response.data_base64.len(), 128 * 1024);
++            }
++            other => panic!("unexpected payload: {other:?}"),
++        }
++    }
++
+     fn restricted_policy(entries: Vec<FileSystemSandboxEntry>) -> FileSystemSandboxPolicy {
+         FileSystemSandboxPolicy::restricted(entries)
+     }
