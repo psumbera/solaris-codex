@@ -10,17 +10,18 @@ before it can exit. Add a regression test that returns a helper-shaped response
 larger than a typical pipe buffer.
 
 diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
+index a99a949..91c7ae4 100644
 --- a/codex-rs/exec-server/src/fs_sandbox.rs
 +++ b/codex-rs/exec-server/src/fs_sandbox.rs
-@@ -15,6 +15,7 @@
- use codex_sandboxing::SandboxablePreference;
+@@ -16,6 +16,7 @@ use codex_sandboxing::SandboxablePreference;
  use codex_utils_absolute_path::AbsolutePathBuf;
  use codex_utils_absolute_path::canonicalize_preserving_symlinks;
+ use codex_utils_path_uri::PathUri;
 +use tokio::io::AsyncReadExt;
  use tokio::io::AsyncWriteExt;
  use tokio::process::Command;
  
-@@ -249,6 +250,25 @@
+@@ -274,6 +275,25 @@ async fn run_command(
      request_json: Vec<u8>,
  ) -> Result<FsHelperPayload, JSONRPCErrorError> {
      let mut child = spawn_command(command)?;
@@ -46,7 +47,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
      let mut stdin = child
          .stdin
          .take()
-@@ -257,15 +277,17 @@
+@@ -282,15 +302,17 @@ async fn run_command(
      stdin.shutdown().await.map_err(io_error)?;
      drop(stdin);
  
@@ -69,7 +70,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
      match response {
          FsHelperResponse::Ok(payload) => Ok(payload),
          FsHelperResponse::Error(error) => Err(error),
-@@ -305,6 +327,10 @@
+@@ -331,6 +353,10 @@ fn io_error(err: std::io::Error) -> JSONRPCErrorError {
      internal_error(err.to_string())
  }
  
@@ -80,7 +81,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
      internal_error(format!(
          "failed to encode or decode fs sandbox helper message: {err}"
-@@ -566,6 +592,58 @@
+@@ -642,6 +668,58 @@ mod tests {
          assert!(policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
  

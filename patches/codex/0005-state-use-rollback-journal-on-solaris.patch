@@ -13,7 +13,7 @@ Why it is needed:
   `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
 
 diff --git a/codex-rs/state/src/runtime.rs b/codex-rs/state/src/runtime.rs
-index b08545d..015d224 100644
+index 2937bf0..633c0d7 100644
 --- a/codex-rs/state/src/runtime.rs
 +++ b/codex-rs/state/src/runtime.rs
 @@ -37,6 +37,8 @@ use codex_protocol::protocol::RolloutItem;
@@ -39,7 +39,7 @@ index b08545d..015d224 100644
  use std::path::Path;
  use std::path::PathBuf;
  use std::sync::Arc;
-@@ -302,11 +308,90 @@ impl StateRuntime {
+@@ -347,11 +353,90 @@ async fn close_sqlite_pools(pools: &[&SqlitePool]) {
      }
  }
  
@@ -131,7 +131,7 @@ index b08545d..015d224 100644
          .synchronous(SqliteSynchronous::Normal)
          .busy_timeout(Duration::from_secs(5))
          .log_statements(LevelFilter::Off)
-@@ -353,6 +438,9 @@ async fn open_sqlite(
+@@ -398,6 +483,9 @@ async fn open_sqlite(
      spec: RuntimeDbSpec,
      telemetry_override: Option<&dyn DbTelemetry>,
  ) -> anyhow::Result<SqlitePool> {

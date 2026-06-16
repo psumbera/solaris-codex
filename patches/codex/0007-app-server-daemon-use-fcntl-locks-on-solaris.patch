@@ -11,10 +11,10 @@ Why it is needed:
   libc::flock, LOCK_EX, and LOCK_NB are unavailable
 
 diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server-daemon/src/backend/pid.rs
-index f5f4fc5..1742d25 100644
+index b525e61..68c85dc 100644
 --- a/codex-rs/app-server-daemon/src/backend/pid.rs
 +++ b/codex-rs/app-server-daemon/src/backend/pid.rs
-@@ -571,7 +571,7 @@ enum EmptyPidReservation {
+@@ -589,7 +589,7 @@ enum EmptyPidReservation {
      Record(PidRecord),
  }
  
@@ -23,7 +23,7 @@ index f5f4fc5..1742d25 100644
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -587,6 +587,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
+@@ -605,6 +605,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
      Err(err).context("failed to lock pid reservation")
  }
  
@@ -60,10 +60,10 @@ index f5f4fc5..1742d25 100644
  fn try_lock_file(_file: &fs::File) -> Result<bool> {
      bail!("pid-managed app-server startup is unsupported on this platform")
 diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
-index 354c08e..0357ca5 100644
+index 21fecef..461bda0 100644
 --- a/codex-rs/app-server-daemon/src/lib.rs
 +++ b/codex-rs/app-server-daemon/src/lib.rs
-@@ -813,7 +813,7 @@ fn should_reexec_updater(
+@@ -823,7 +823,7 @@ fn should_reexec_updater(
          && outcome == RestartIfRunningOutcome::Restarted
  }
  
@@ -72,7 +72,7 @@ index 354c08e..0357ca5 100644
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -829,6 +829,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+@@ -839,6 +839,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      Err(err).context("failed to lock daemon operation")
  }
  
