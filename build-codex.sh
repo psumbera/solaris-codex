@@ -344,6 +344,60 @@ checksum_json.write_text(json.dumps(data, separators=(",", ":")))
 PY2
 }
 
+patch_vendored_mio_event_ports() {
+  local mio_root=${CODEX_VENDOR_DIR}/mio
+  local checksum_json=${mio_root}/.cargo-checksum.json
+  local event_ports_rs=${mio_root}/src/sys/unix/selector/event_ports.rs
+  local patch
+
+  [[ -d "${mio_root}" ]] || die "missing vendored mio source: ${mio_root}"
+  [[ -f "${checksum_json}" ]] || die "missing vendored mio checksum: ${checksum_json}"
+
+  if [[ ! -f "${event_ports_rs}" ]]; then
+    for patch in "${TOP}/patches/mio"/*.patch; do
+      [[ -e "${patch}" ]] || die "missing mio Solaris event ports patch"
+      if (
+        cd "${mio_root}"
+        "${PATCH_TOOL}" --dry-run -p1 < "${patch}" >/dev/null 2>&1
+      ); then
+        log "Applying vendored mio $(basename "${patch}")"
+        (
+          cd "${mio_root}"
+          "${PATCH_TOOL}" -p1 < "${patch}"
+        )
+      else
+        die "failed to apply vendored mio patch: ${patch}"
+      fi
+    done
+  fi
+
+  [[ -f "${event_ports_rs}" ]] || die "vendored mio Solaris event ports source was not created"
+
+  python3 - "${mio_root}" "${checksum_json}" <<'PY2'
+from pathlib import Path
+import hashlib
+import json
+import sys
+
+root = Path(sys.argv[1])
+checksum_json = Path(sys.argv[2])
+paths = [
+    "src/poll.rs",
+    "src/sys/unix/mod.rs",
+    "src/sys/unix/selector/event_ports.rs",
+]
+
+data = json.loads(checksum_json.read_text())
+files = data.setdefault("files", {})
+for rel in paths:
+    path = root / rel
+    if not path.is_file():
+        raise SystemExit(f"missing vendored mio file: {path}")
+    files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+checksum_json.write_text(json.dumps(data, separators=(",", ":")))
+PY2
+}
+
 patch_tui_solaris_terminal_input() {
   local tui_rs=${CODEX_SRC_DIR}/tui/src/tui.rs
   local event_stream_rs=${CODEX_SRC_DIR}/tui/src/tui/event_stream.rs
@@ -935,7 +989,7 @@ v8_install_matches_pin || bash "${TOP}/build-v8.sh"
 ensure_codex_source
 apply_patch_series "${CODEX_REPO_DIR}" "${TOP}/patches/codex"
 patch_tui_solaris_terminal_input
-vendor_rust_sources "${CODEX_SRC_DIR}" "${CODEX_VENDOR_DIR}"
+vendor_rust_sources "${CODEX_SRC_DIR}" "${CODEX_VENDOR_DIR}" "" unlocked
 
 # Apply the remaining Solaris vendored-crate rewrites after cargo vendor.
 # These stay scripted because each change must also refresh the vendored
@@ -944,6 +998,7 @@ patch_vendored_nix_termios
 patch_vendored_tree_sitter_endian
 patch_vendored_fslock
 patch_vendored_onig_sys_alloca
+patch_vendored_mio_event_ports
 
 export GN="${GN_INSTALL_DIR}/bin/gn"
 export RUSTY_V8_ARCHIVE="${V8_INSTALL_DIR}/lib/librusty_v8.a"

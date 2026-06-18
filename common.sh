@@ -275,6 +275,7 @@ vendor_rust_sources() {
   local src_dir=$1
   local vendor_dir=$2
   local extra_file=${3:-}
+  local lock_mode=${4:-locked}
   local cargo_dir=${src_dir}/.cargo
   local config=${cargo_dir}/config.toml
   local raw=${vendor_dir}.config.raw
@@ -299,7 +300,9 @@ vendor_rust_sources() {
   log "Vendoring Rust dependencies for $(basename "${src_dir}")"
   (
     cd "${src_dir}"
-    if ! "${CARGO}" vendor --locked "${vendor_dir}" > "${raw}"; then
+    if [[ "${lock_mode}" == "unlocked" ]]; then
+      "${CARGO}" vendor "${vendor_dir}" > "${raw}"
+    elif ! "${CARGO}" vendor --locked --offline "${vendor_dir}" > "${raw}"; then
       log "cargo vendor --locked requested a lockfile refresh; retrying without --locked"
       rm -rf "${vendor_dir}" "${raw}"
       "${CARGO}" vendor "${vendor_dir}" > "${raw}"

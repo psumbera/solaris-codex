@@ -61,7 +61,7 @@ build/install/codex/bin/codex --version
 - The wrapper uses the official Solaris Rust standalone installer target
   `x86_64-pc-solaris`.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.140.0`, built from its `codex-rs/` workspace.
+  `rust-v0.141.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -78,11 +78,6 @@ patch series under `patches/codex/` before vendoring:
 - `0002-tui-disable-unsupported-clipboard-backends-on-solaris.patch` disables
   native clipboard image and text paths that have no maintained Solaris backend
   and leaves the SSH and OSC 52 text-copy path available.
-- `0003-tui-work-around-solaris-terminal-input-and-layout.patch` keeps the TUI
-  off terminal capability probes that stalled some Solaris PTYs, replaces the
-  unreliable default `crossterm::event::EventStream` path with a Solaris input
-  reader, prefers an ASCII-safe presentation on older terminals, and redraws the
-  onboarding flow so the actionable step stays visible on smaller PTYs.
 - `0004-config-host-name-use-solaris-ai-canonname-fallback.patch` supplies the
   Solaris `AI_CANONNAME` value that the Rust `libc` crate does not expose.
 - `0005-state-use-rollback-journal-on-solaris.patch` keeps Codex state
@@ -96,6 +91,14 @@ patch series under `patches/codex/` before vendoring:
 - `0008-http-client-honor-no-proxy-before-system-proxy.patch` makes
   exec-server HTTP requests honor `NO_PROXY`/`no_proxy` hosts before reqwest's
   system proxy lookup.
+- `0010-exec-server-drain-fs-helper-output-concurrently.patch` keeps large
+  filesystem-helper responses from blocking on a full stdout pipe.
+
+Before vendoring, `patch_tui_solaris_terminal_input()` keeps the TUI off
+terminal capability probes that stalled some Solaris PTYs, replaces the
+unreliable default `crossterm::event::EventStream` path with a Solaris input
+reader, prefers an ASCII-safe presentation on older terminals, and redraws the
+onboarding flow so the actionable step stays visible on smaller PTYs.
 
 After `cargo vendor`, `build-codex.sh` still applies the remaining Solaris
 vendored-crate rewrites in place:
@@ -104,9 +107,13 @@ vendored-crate rewrites in place:
 - `patch_vendored_tree_sitter_endian()`
 - `patch_vendored_fslock()`
 - `patch_vendored_onig_sys_alloca()`
+- `patch_vendored_mio_event_ports()`
 
 Those helpers remain scripted because they also update vendored crate
 `.cargo-checksum.json`, which makes static patch files awkward to maintain.
+The mio event-ports rewrite applies the upstream proposal from
+`https://github.com/tokio-rs/mio/pull/1962`, refreshed against the `mio 1.2.0`
+crate version locked by Codex.
 
 ## Maintainer Notes
 

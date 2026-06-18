@@ -1,0 +1,1041 @@
+From 5d23ae537cc27f956b5474f4e3cd43f982b59e88 Mon Sep 17 00:00:00 2001
+From: Petr Sumbera <sumbera@volny.cz>
+Date: Wed, 17 Jun 2026 14:32:10 +0200
+Subject: [PATCH] Add Solaris event ports selector
+
+Use Solaris event ports as the native os-poll backend instead of the poll(2)-based fallback. Keep the existing poll backend available behind mio_unsupported_force_poll_poll for comparison and unsupported builds.
+
+Derived from https://github.com/tokio-rs/mio/pull/1962 and refreshed against mio 1.2.0 for the Codex 0.141.0 lockfile.
+---
+ src/poll.rs                          |   7 +-
+ src/sys/unix/mod.rs                  |  13 +-
+ src/sys/unix/selector/event_ports.rs | 905 +++++++++++++++++++++++++++
+ 3 files changed, 917 insertions(+), 8 deletions(-)
+ create mode 100644 src/sys/unix/selector/event_ports.rs
+
+diff --git a/src/poll.rs b/src/poll.rs
+index 0b9497a..4f860bc 100644
+--- a/src/poll.rs
++++ b/src/poll.rs
+@@ -9,7 +9,6 @@
+         target_os = "hermit",
+         target_os = "hurd",
+         target_os = "nto",
+-        target_os = "solaris",
+         target_os = "vita",
+         target_os = "cygwin",
+     )),
+@@ -242,6 +241,7 @@ use crate::{event, sys, Events, Interest, Token};
+ /// | Linux         | [epoll]   |
+ /// | NetBSD        | [kqueue]  |
+ /// | OpenBSD       | [kqueue]  |
++/// | Solaris       | [event ports] |
+ /// | Windows       | [IOCP]    |
+ /// | macOS         | [kqueue]  |
+ ///
+@@ -260,6 +260,7 @@ use crate::{event, sys, Events, Interest, Token};
+ /// kernel.
+ ///
+ /// [epoll]: https://man7.org/linux/man-pages/man7/epoll.7.html
++/// [event ports]: https://docs.oracle.com/cd/E88353_01/html/E37843/port-create-3c.html
+ /// [kqueue]: https://www.freebsd.org/cgi/man.cgi?query=kqueue&sektion=2
+ /// [IOCP]: https://docs.microsoft.com/en-us/windows/win32/fileio/i-o-completion-ports
+ /// [`signalfd`]: https://man7.org/linux/man-pages/man2/signalfd.2.html
+@@ -452,7 +453,6 @@ impl Poll {
+         target_os = "hermit",
+         target_os = "hurd",
+         target_os = "nto",
+-        target_os = "solaris",
+         target_os = "vita",
+         target_os = "cygwin",
+     )),
+@@ -754,7 +754,6 @@ impl fmt::Debug for Registry {
+         target_os = "hermit",
+         target_os = "hurd",
+         target_os = "nto",
+-        target_os = "solaris",
+         target_os = "vita",
+         target_os = "cygwin",
+     )),
+@@ -776,7 +775,6 @@ impl AsFd for Registry {
+         target_os = "hermit",
+         target_os = "hurd",
+         target_os = "nto",
+-        target_os = "solaris",
+         target_os = "vita",
+         target_os = "cygwin",
+     )),
+@@ -797,7 +795,6 @@ cfg_os_poll! {
+             target_os = "hermit",
+             target_os = "hurd",
+             target_os = "nto",
+-            target_os = "solaris",
+             target_os = "vita",
+             target_os = "cygwin",
+         )),
+diff --git a/src/sys/unix/mod.rs b/src/sys/unix/mod.rs
+index bae9cee..2bf2d2f 100644
+--- a/src/sys/unix/mod.rs
++++ b/src/sys/unix/mod.rs
+@@ -38,6 +38,10 @@ cfg_os_poll! {
+             target_os = "watchos",
+         )
+     ), path = "selector/kqueue.rs")]
++    #[cfg_attr(all(
++        not(mio_unsupported_force_poll_poll),
++        target_os = "solaris",
++    ), path = "selector/event_ports.rs")]
+     #[cfg_attr(any(
+         mio_unsupported_force_poll_poll,
+         target_os = "aix",
+@@ -47,7 +51,6 @@ cfg_os_poll! {
+         target_os = "hermit",
+         target_os = "hurd",
+         target_os = "nto",
+-        target_os = "solaris",
+         target_os = "vita",
+         target_os = "cygwin",
+         target_os = "wasi",
+@@ -55,6 +58,10 @@ cfg_os_poll! {
+     mod selector;
+     pub(crate) use self::selector::*;
+ 
++    #[cfg(not(all(
++        not(mio_unsupported_force_poll_poll),
++        target_os = "solaris",
++    )))]
+     #[cfg_attr(all(
+         not(mio_unsupported_force_waker_pipe),
+         any(
+@@ -101,7 +108,7 @@ cfg_os_poll! {
+         target_os = "nto",
+         target_os = "openbsd",
+         target_os = "redox",
+-        target_os = "solaris",
++        all(mio_unsupported_force_poll_poll, target_os = "solaris"),
+         target_os = "vita",
+         target_os = "cygwin",
+         all(target_os = "wasi", target_env = "p1")
+@@ -152,7 +159,7 @@ cfg_os_poll! {
+             target_os = "nto",
+             target_os = "openbsd",
+             target_os = "redox",
+-            target_os = "solaris",
++            all(mio_unsupported_force_poll_poll, target_os = "solaris"),
+             target_os = "vita",
+             target_os = "cygwin",
+         ),
+diff --git a/src/sys/unix/selector/event_ports.rs b/src/sys/unix/selector/event_ports.rs
+new file mode 100644
+index 0000000..37757ef
+--- /dev/null
++++ b/src/sys/unix/selector/event_ports.rs
+@@ -0,0 +1,905 @@
++use std::collections::HashMap;
++use std::fmt::{self, Debug, Formatter};
++use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
++use std::ptr;
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
++use std::sync::{Arc, Mutex};
++use std::time::{Duration, Instant};
++use std::{cmp, io};
++
++use crate::{Interest, Token};
++
++/// Unique id for use as `SelectorId`.
++#[cfg(debug_assertions)]
++static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
++
++const PORT_SOURCE_USER: libc::c_int = 3;
++const PORT_SOURCE_FD: libc::c_int = 4;
++
++type EventMask = libc::c_int;
++
++const POLLRDHUP: EventMask = 0;
++const READ_EVENTS: EventMask = libc::POLLIN as EventMask;
++const WRITE_EVENTS: EventMask = libc::POLLOUT as EventMask;
++const PRIORITY_EVENTS: EventMask = libc::POLLPRI as EventMask;
++const ERROR_EVENTS: EventMask = libc::POLLERR as EventMask | libc::POLLHUP as EventMask;
++
++#[repr(C)]
++#[derive(Clone, Copy)]
++struct PortEvent {
++    events: libc::c_int,
++    source: libc::c_ushort,
++    _pad: libc::c_ushort,
++    object: libc::uintptr_t,
++    user: *mut libc::c_void,
++}
++
++impl Debug for PortEvent {
++    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
++        f.debug_struct("port_event")
++            .field("events", &self.events)
++            .field("source", &self.source)
++            .field("object", &self.object)
++            .field("user", &self.user)
++            .finish()
++    }
++}
++
++extern "C" {
++    fn port_create() -> libc::c_int;
++    fn port_associate(
++        port: libc::c_int,
++        source: libc::c_int,
++        object: libc::uintptr_t,
++        events: libc::c_int,
++        user: *mut libc::c_void,
++    ) -> libc::c_int;
++    cfg_any_os_ext! {
++    fn port_dissociate(
++        port: libc::c_int,
++        source: libc::c_int,
++        object: libc::uintptr_t,
++    ) -> libc::c_int;
++    }
++    fn port_send(port: libc::c_int, events: libc::c_int, user: *mut libc::c_void) -> libc::c_int;
++    fn port_getn(
++        port: libc::c_int,
++        list: *mut PortEvent,
++        max: libc::c_uint,
++        nget: *mut libc::c_uint,
++        timeout: *const libc::timespec,
++    ) -> libc::c_int;
++}
++
++#[derive(Debug)]
++pub struct Selector {
++    #[cfg(debug_assertions)]
++    id: usize,
++    port: OwnedFd,
++    state: Arc<SelectorState>,
++}
++
++#[derive(Debug)]
++struct SelectorState {
++    fds: Mutex<HashMap<RawFd, FdData>>,
++    pending_wake_token: Mutex<Option<Token>>,
++    wake_queued: AtomicBool,
++}
++
++#[derive(Debug)]
++struct FdData {
++    token: Token,
++    interests: Interest,
++    generation: usize,
++    associated: bool,
++    needs_fallback: bool,
++    fallback_writable: bool,
++}
++
++impl Selector {
++    pub fn new() -> io::Result<Selector> {
++        // SAFETY: `port_create(3C)` returns a valid fd on success.
++        let port = unsafe { OwnedFd::from_raw_fd(syscall_result(port_create())?) };
++        syscall!(fcntl(port.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC))?;
++
++        Ok(Selector {
++            #[cfg(debug_assertions)]
++            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
++            port,
++            state: Arc::new(SelectorState {
++                fds: Mutex::new(HashMap::new()),
++                pending_wake_token: Mutex::new(None),
++                wake_queued: AtomicBool::new(false),
++            }),
++        })
++    }
++
++    pub fn try_clone(&self) -> io::Result<Selector> {
++        self.port.try_clone().map(|port| Selector {
++            // It's the same selector, so we use the same id.
++            #[cfg(debug_assertions)]
++            id: self.id,
++            port,
++            state: Arc::clone(&self.state),
++        })
++    }
++
++    pub fn select(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
++        self.state.select(self.port.as_raw_fd(), events, timeout)
++    }
++
++    cfg_io_source! {
++    #[allow(dead_code)]
++    pub fn register(&self, fd: RawFd, token: Token, interests: Interest) -> io::Result<()> {
++        self.register_internal(fd, token, interests).map(|_| ())
++    }
++
++    pub(crate) fn register_internal(
++        &self,
++        fd: RawFd,
++        token: Token,
++        interests: Interest,
++    ) -> io::Result<Arc<RegistrationRecord>> {
++        self.state
++            .register(self.port.as_raw_fd(), fd, token, interests)
++    }
++    }
++
++    cfg_any_os_ext! {
++    pub fn reregister(&self, fd: RawFd, token: Token, interests: Interest) -> io::Result<()> {
++        self.state.reregister(self.port.as_raw_fd(), fd, token, interests)
++    }
++
++    pub fn deregister(&self, fd: RawFd) -> io::Result<()> {
++        self.state.deregister(self.port.as_raw_fd(), fd)
++    }
++    }
++
++    pub fn wake(&self, token: Token) -> io::Result<()> {
++        self.state.wake(self.port.as_raw_fd(), token)
++    }
++}
++
++cfg_io_source! {
++    impl Selector {
++        #[cfg(debug_assertions)]
++        pub fn id(&self) -> usize {
++            self.id
++        }
++    }
++}
++
++impl SelectorState {
++    fn select(
++        &self,
++        port: RawFd,
++        events: &mut Events,
++        timeout: Option<Duration>,
++    ) -> io::Result<()> {
++        events.clear();
++
++        if events.capacity() == 0 {
++            return Ok(());
++        }
++
++        let start = Instant::now();
++        let mut attempted = false;
++        let mut raw_events = vec![empty_port_event(); events.capacity()];
++
++        loop {
++            let current_timeout = if attempted {
++                match timeout {
++                    Some(timeout) => match timeout.checked_sub(start.elapsed()) {
++                        Some(timeout) => Some(timeout),
++                        None => return Ok(()),
++                    },
++                    None => None,
++                }
++            } else {
++                timeout
++            };
++            let poll_fallback_on_timeout = current_timeout.is_none() && self.has_fallback_fds();
++            let current_timeout = current_timeout.or_else(|| {
++                if poll_fallback_on_timeout {
++                    Some(Duration::from_millis(100))
++                } else {
++                    None
++                }
++            });
++            let timeout = timeout_to_timespec(current_timeout);
++            let timeout = timeout
++                .as_ref()
++                .map(|timeout| timeout as *const _)
++                .unwrap_or(ptr::null());
++            let mut nget = 1;
++
++            trace!("waiting for Solaris event port events");
++            let res = unsafe {
++                port_getn(
++                    port,
++                    raw_events.as_mut_ptr(),
++                    raw_events.len() as libc::c_uint,
++                    &mut nget,
++                    timeout,
++                )
++            };
++            attempted = true;
++
++            if res < 0 {
++                let err = io::Error::last_os_error();
++                match err.raw_os_error() {
++                    Some(libc::ETIME) => {
++                        self.poll_registered_fds(events, poll_fallback_on_timeout)?;
++                        return Ok(());
++                    }
++                    Some(libc::EINTR) => continue,
++                    _ => return Err(err),
++                }
++            }
++
++            if nget == 0 {
++                self.poll_registered_fds(events, poll_fallback_on_timeout)?;
++                return Ok(());
++            }
++
++            trace!(
++                "Solaris event port returned {:?}",
++                &raw_events[..nget as usize]
++            );
++            self.convert_events(port, &raw_events[..nget as usize], events)?;
++            if !events.is_empty() {
++                self.drain_events(port, &mut raw_events, events)?;
++                return Ok(());
++            }
++        }
++    }
++
++    fn drain_events(
++        &self,
++        port: RawFd,
++        raw_events: &mut [PortEvent],
++        events: &mut Events,
++    ) -> io::Result<()> {
++        let timeout = libc::timespec {
++            tv_sec: 0,
++            tv_nsec: 0,
++        };
++
++        for _ in 0..raw_events.len() {
++            let mut nget = raw_events.len() as libc::c_uint;
++            let res = unsafe {
++                port_getn(
++                    port,
++                    raw_events.as_mut_ptr(),
++                    raw_events.len() as libc::c_uint,
++                    &mut nget,
++                    &timeout,
++                )
++            };
++
++            if res < 0 {
++                let err = io::Error::last_os_error();
++                match err.raw_os_error() {
++                    Some(libc::ETIME) if nget == 0 => return Ok(()),
++                    Some(libc::ETIME) => {}
++                    Some(libc::EINTR) => continue,
++                    _ => return Err(err),
++                }
++            } else if nget == 0 {
++                return Ok(());
++            }
++
++            trace!(
++                "drained Solaris event port events {:?}",
++                &raw_events[..nget as usize]
++            );
++            self.convert_events(port, &raw_events[..nget as usize], events)?;
++        }
++
++        Ok(())
++    }
++
++    fn convert_events(
++        &self,
++        port: RawFd,
++        raw_events: &[PortEvent],
++        events: &mut Events,
++    ) -> io::Result<()> {
++        let mut fds = self.fds.lock().unwrap();
++
++        events.reserve(raw_events.len());
++        for event in raw_events {
++            if event.source == PORT_SOURCE_USER as libc::c_ushort {
++                self.wake_queued.store(false, Ordering::Release);
++                let token = self
++                    .pending_wake_token
++                    .lock()
++                    .unwrap()
++                    .take()
++                    .unwrap_or(Token(event.user as usize));
++                push_event(events, token, event.events);
++            } else if event.source == PORT_SOURCE_FD as libc::c_ushort {
++                let fd = event.object as RawFd;
++                let generation = event.user as usize;
++
++                let Some(data) = fds.get_mut(&fd) else {
++                    continue;
++                };
++                let current_interest_events = interests_to_port(data.interests);
++                let Some(poll_events) = poll_fd_readiness(fd, data.interests)? else {
++                    if event.events & ERROR_EVENTS == 0 {
++                        let generation = data.generation.wrapping_add(1).max(1);
++                        associate(port, fd, data.interests, generation)?;
++                        data.generation = generation;
++                        data.associated = true;
++                        data.needs_fallback = false;
++                        data.fallback_writable = false;
++                        continue;
++                    }
++
++                    let poll_events = event.events;
++                    if data.generation != generation && poll_events & current_interest_events == 0 {
++                        let generation = data.generation.wrapping_add(1).max(1);
++                        associate(port, fd, data.interests, generation)?;
++                        data.generation = generation;
++                        data.associated = true;
++                        data.needs_fallback = false;
++                        data.fallback_writable = false;
++                        continue;
++                    }
++
++                    let generation = data.generation.wrapping_add(1).max(1);
++                    associate(port, fd, data.interests, generation)?;
++                    data.generation = generation;
++                    data.associated = true;
++                    data.needs_fallback = false;
++                    data.fallback_writable = false;
++                    push_event(events, data.token, poll_events);
++                    continue;
++                };
++                if data.generation != generation && poll_events & current_interest_events == 0 {
++                    let generation = data.generation.wrapping_add(1).max(1);
++                    associate(port, fd, data.interests, generation)?;
++                    data.generation = generation;
++                    data.associated = true;
++                    data.needs_fallback = false;
++                    data.fallback_writable = false;
++                    continue;
++                }
++
++                // Event ports disassociate an fd after delivery. Re-associate
++                // only interests that were not delivered, and use fallback
++                // polling for delivered interests so sources that clear
++                // readiness without reregistering can observe future events.
++                let generation = data.generation.wrapping_add(1).max(1);
++                let remaining_interests = data
++                    .interests
++                    .remove(interests_from_event(poll_events).unwrap_or(data.interests));
++                if let Some(remaining_interests) = remaining_interests {
++                    associate(port, fd, remaining_interests, generation)?;
++                    data.associated = true;
++                } else {
++                    data.associated = false;
++                }
++                data.generation = generation;
++                data.needs_fallback = true;
++                data.fallback_writable = false;
++
++                push_event(events, data.token, poll_events);
++            }
++        }
++
++        Ok(())
++    }
++
++    fn poll_registered_fds(
++        &self,
++        events: &mut Events,
++        include_writable_only: bool,
++    ) -> io::Result<()> {
++        let mut fds = self.fds.lock().unwrap();
++        if fds.is_empty() {
++            return Ok(());
++        }
++
++        let mut poll_fds = Vec::new();
++        let mut tokens = Vec::new();
++        let mut fallback_writable = Vec::new();
++        for (&fd, data) in fds.iter() {
++            if !data.needs_fallback {
++                continue;
++            }
++
++            poll_fds.push(libc::pollfd {
++                fd,
++                events: interests_to_port(data.interests) as libc::c_short,
++                revents: 0,
++            });
++            tokens.push(data.token);
++            fallback_writable.push(data.fallback_writable);
++        }
++
++        if poll_fds.is_empty() {
++            return Ok(());
++        }
++
++        syscall_result(unsafe {
++            libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, 0)
++        })?;
++
++        events.reserve(poll_fds.len());
++        for ((poll_fd, token), fallback_writable) in
++            poll_fds.iter().zip(tokens).zip(fallback_writable)
++        {
++            if poll_fd.revents != 0 {
++                let revents = EventMask::from(poll_fd.revents);
++                let writable_only = revents & !WRITE_EVENTS == 0;
++                if include_writable_only || fallback_writable || !writable_only {
++                    push_event(events, token, revents);
++                    if writable_only {
++                        if let Some(data) = fds.get_mut(&poll_fd.fd) {
++                            data.fallback_writable = false;
++                        }
++                    }
++                }
++            }
++        }
++
++        Ok(())
++    }
++
++    fn has_fallback_fds(&self) -> bool {
++        self.fds
++            .lock()
++            .unwrap()
++            .values()
++            .any(|data| data.needs_fallback)
++    }
++
++    cfg_io_source! {
++    fn register(
++        &self,
++        port: RawFd,
++        fd: RawFd,
++        token: Token,
++        interests: Interest,
++    ) -> io::Result<Arc<RegistrationRecord>> {
++        let mut fds = self.fds.lock().unwrap();
++        if fds.contains_key(&fd) {
++            return Err(io::Error::new(
++                io::ErrorKind::AlreadyExists,
++                "I/O source already registered this `Registry` \
++                (an old file descriptor might have been closed without deregistration)",
++            ));
++        }
++
++        let record = Arc::new(RegistrationRecord::new());
++        fds.insert(
++            fd,
++            FdData {
++                token,
++                interests,
++                generation: 1,
++                associated: false,
++                needs_fallback: true,
++                fallback_writable: true,
++            },
++        );
++
++        match associate(port, fd, interests, 1) {
++            Ok(()) => {
++                fds.get_mut(&fd).unwrap().associated = true;
++                Ok(record)
++            }
++            Err(err) => {
++                fds.remove(&fd);
++                Err(err)
++            }
++        }
++    }
++    }
++
++    cfg_any_os_ext! {
++    fn reregister(
++        &self,
++        port: RawFd,
++        fd: RawFd,
++        token: Token,
++        interests: Interest,
++    ) -> io::Result<()> {
++        let mut fds = self.fds.lock().unwrap();
++        let data = fds.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
++        let generation = data.generation.wrapping_add(1).max(1);
++
++        associate(port, fd, interests, generation)?;
++
++        data.token = token;
++        data.interests = interests;
++        data.generation = generation;
++        data.associated = true;
++        data.needs_fallback = true;
++        data.fallback_writable = true;
++        Ok(())
++    }
++
++    fn deregister(&self, port: RawFd, fd: RawFd) -> io::Result<()> {
++        let mut fds = self.fds.lock().unwrap();
++        let data = fds.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
++
++        if data.associated {
++            dissociate(port, fd)?;
++        }
++        Ok(())
++    }
++    }
++
++    fn wake(&self, port: RawFd, token: Token) -> io::Result<()> {
++        self.pending_wake_token.lock().unwrap().replace(token);
++
++        if self.wake_queued.swap(true, Ordering::AcqRel) {
++            return Ok(());
++        }
++
++        let result = syscall_result(unsafe {
++            port_send(
++                port,
++                libc::POLLIN as libc::c_int,
++                usize::from(token) as *mut libc::c_void,
++            )
++        })
++        .map(|_| ());
++
++        if result.is_err() {
++            self.wake_queued.store(false, Ordering::Release);
++        }
++
++        result
++    }
++}
++
++fn push_event(events: &mut Events, token: Token, event_mask: EventMask) {
++    if let Some(event) = events.iter_mut().find(|event| event.token == token) {
++        event.events |= event_mask;
++    } else {
++        events.push(Event {
++            token,
++            events: event_mask,
++        });
++    }
++}
++
++fn poll_fd_readiness(fd: RawFd, interests: Interest) -> io::Result<Option<EventMask>> {
++    let mut poll_fd = libc::pollfd {
++        fd,
++        events: interests_to_port(interests) as libc::c_short,
++        revents: 0,
++    };
++
++    if syscall_result(unsafe { libc::poll(&mut poll_fd, 1, 0) })? == 0 {
++        Ok(None)
++    } else {
++        Ok(Some(EventMask::from(poll_fd.revents)))
++    }
++}
++
++fn associate(port: RawFd, fd: RawFd, interests: Interest, generation: usize) -> io::Result<()> {
++    syscall_result(unsafe {
++        port_associate(
++            port,
++            PORT_SOURCE_FD,
++            fd as libc::uintptr_t,
++            interests_to_port(interests),
++            generation as *mut libc::c_void,
++        )
++    })
++    .map(|_| ())
++}
++
++cfg_any_os_ext! {
++fn dissociate(port: RawFd, fd: RawFd) -> io::Result<()> {
++    syscall_result(unsafe { port_dissociate(port, PORT_SOURCE_FD, fd as libc::uintptr_t) })
++        .map(|_| ())
++        .or_else(|err| {
++            if err.raw_os_error() == Some(libc::ENOENT) {
++                Ok(())
++            } else {
++                Err(err)
++            }
++        })
++}
++}
++
++fn syscall_result(res: libc::c_int) -> io::Result<libc::c_int> {
++    if res < 0 {
++        Err(io::Error::last_os_error())
++    } else {
++        Ok(res)
++    }
++}
++
++fn empty_port_event() -> PortEvent {
++    PortEvent {
++        events: 0,
++        source: 0,
++        _pad: 0,
++        object: 0,
++        user: ptr::null_mut(),
++    }
++}
++
++fn timeout_to_timespec(timeout: Option<Duration>) -> Option<libc::timespec> {
++    timeout.map(|timeout| libc::timespec {
++        tv_sec: cmp::min(timeout.as_secs(), libc::time_t::MAX as u64) as libc::time_t,
++        tv_nsec: libc::c_long::from(timeout.subsec_nanos() as i32),
++    })
++}
++
++fn interests_to_port(interests: Interest) -> EventMask {
++    let mut events = 0;
++
++    if interests.is_readable() {
++        events |= READ_EVENTS;
++    }
++
++    if interests.is_writable() {
++        events |= WRITE_EVENTS;
++    }
++
++    if interests.is_priority() {
++        events |= PRIORITY_EVENTS;
++    }
++
++    events
++}
++
++fn interests_from_event(events: EventMask) -> Option<Interest> {
++    let mut interests = None;
++
++    if (events & READ_EVENTS) != 0 {
++        interests = Some(Interest::READABLE);
++    }
++
++    if (events & WRITE_EVENTS) != 0 {
++        interests = Some(match interests {
++            Some(interests) => interests.add(Interest::WRITABLE),
++            None => Interest::WRITABLE,
++        });
++    }
++
++    interests
++}
++
++#[derive(Debug, Clone)]
++pub struct Event {
++    token: Token,
++    events: EventMask,
++}
++
++pub type Events = Vec<Event>;
++
++pub mod event {
++    use std::fmt;
++
++    use crate::sys::Event;
++    use crate::Token;
++
++    use super::{EventMask, POLLRDHUP};
++
++    pub fn token(event: &Event) -> Token {
++        event.token
++    }
++
++    pub fn is_readable(event: &Event) -> bool {
++        (event.events & libc::POLLIN as EventMask) != 0
++            || (event.events & libc::POLLPRI as EventMask) != 0
++    }
++
++    pub fn is_writable(event: &Event) -> bool {
++        (event.events & libc::POLLOUT as EventMask) != 0
++    }
++
++    pub fn is_error(event: &Event) -> bool {
++        (event.events & libc::POLLERR as EventMask) != 0
++    }
++
++    pub fn is_read_closed(event: &Event) -> bool {
++        (event.events & libc::POLLHUP as EventMask) != 0 || (event.events & POLLRDHUP) != 0
++    }
++
++    pub fn is_write_closed(event: &Event) -> bool {
++        (event.events & libc::POLLHUP as EventMask) != 0
++            || ((event.events & libc::POLLOUT as EventMask) != 0
++                && (event.events & libc::POLLERR as EventMask) != 0)
++            || event.events == libc::POLLERR as EventMask
++    }
++
++    pub fn is_priority(event: &Event) -> bool {
++        (event.events & libc::POLLPRI as EventMask) != 0
++    }
++
++    pub fn is_aio(_: &Event) -> bool {
++        false
++    }
++
++    pub fn is_lio(_: &Event) -> bool {
++        false
++    }
++
++    pub fn debug_details(f: &mut fmt::Formatter<'_>, event: &Event) -> fmt::Result {
++        #[allow(clippy::trivially_copy_pass_by_ref)]
++        fn check_events(got: &EventMask, want: &libc::c_short) -> bool {
++            (*got & EventMask::from(*want)) != 0
++        }
++        debug_detail!(
++            EventsDetails(EventMask),
++            check_events,
++            libc::POLLIN,
++            libc::POLLPRI,
++            libc::POLLOUT,
++            libc::POLLRDNORM,
++            libc::POLLRDBAND,
++            libc::POLLWRNORM,
++            libc::POLLWRBAND,
++            libc::POLLERR,
++            libc::POLLHUP,
++        );
++
++        f.debug_struct("port_event")
++            .field("token", &event.token)
++            .field("events", &EventsDetails(event.events))
++            .finish()
++    }
++}
++
++#[derive(Debug)]
++pub(crate) struct Waker {
++    selector: Selector,
++    token: Token,
++}
++
++impl Waker {
++    pub(crate) fn new(selector: &Selector, token: Token) -> io::Result<Waker> {
++        Ok(Waker {
++            selector: selector.try_clone()?,
++            token,
++        })
++    }
++
++    pub(crate) fn wake(&self) -> io::Result<()> {
++        self.selector.wake(self.token)
++    }
++}
++
++cfg_io_source! {
++    use crate::Registry;
++
++    struct InternalState {
++        selector: Selector,
++        token: Token,
++        interests: Interest,
++        fd: RawFd,
++        shared_record: Arc<RegistrationRecord>,
++    }
++
++    impl Drop for InternalState {
++        fn drop(&mut self) {
++            if self.shared_record.is_registered() {
++                let _ = self.selector.deregister(self.fd);
++            }
++        }
++    }
++
++    pub(crate) struct IoSourceState {
++        inner: Option<Box<InternalState>>,
++    }
++
++    impl IoSourceState {
++        pub fn new() -> IoSourceState {
++            IoSourceState { inner: None }
++        }
++
++        pub fn do_io<T, F, R>(&self, f: F, io: &T) -> io::Result<R>
++        where
++            F: FnOnce(&T) -> io::Result<R>,
++        {
++            let result = f(io);
++
++            if let Err(err) = &result {
++                if err.kind() == io::ErrorKind::WouldBlock {
++                    self.inner.as_ref().map_or(Ok(()), |state| {
++                        state
++                            .selector
++                            .reregister(state.fd, state.token, state.interests)
++                    })?;
++                }
++            }
++
++            result
++        }
++
++        pub fn register(
++            &mut self,
++            registry: &Registry,
++            token: Token,
++            interests: Interest,
++            fd: RawFd,
++        ) -> io::Result<()> {
++            if self.inner.is_some() {
++                Err(io::ErrorKind::AlreadyExists.into())
++            } else {
++                let selector = registry.selector().try_clone()?;
++
++                selector.register_internal(fd, token, interests).map(move |shared_record| {
++                    let state = InternalState {
++                        selector,
++                        token,
++                        interests,
++                        fd,
++                        shared_record,
++                    };
++
++                    self.inner = Some(Box::new(state));
++                })
++            }
++        }
++
++        pub fn reregister(
++            &mut self,
++            registry: &Registry,
++            token: Token,
++            interests: Interest,
++            fd: RawFd,
++        ) -> io::Result<()> {
++            match self.inner.as_mut() {
++                Some(state) => registry.selector().reregister(fd, token, interests).map(|()| {
++                    state.token = token;
++                    state.interests = interests;
++                }),
++                None => Err(io::ErrorKind::NotFound.into()),
++            }
++        }
++
++        pub fn deregister(&mut self, registry: &Registry, fd: RawFd) -> io::Result<()> {
++            if let Some(state) = self.inner.take() {
++                state.shared_record.mark_unregistered();
++            }
++
++            registry.selector().deregister(fd)
++        }
++    }
++}
++
++cfg_io_source! {
++#[derive(Debug)]
++pub(crate) struct RegistrationRecord {
++    is_unregistered: AtomicBool,
++}
++
++impl RegistrationRecord {
++    pub fn new() -> Self {
++        Self {
++            is_unregistered: AtomicBool::new(false),
++        }
++    }
++
++    pub fn mark_unregistered(&self) {
++        self.is_unregistered.store(true, Ordering::Relaxed);
++    }
++
++    pub fn is_registered(&self) -> bool {
++        !self.is_unregistered.load(Ordering::Relaxed)
++    }
++}
++}
++
++impl AsFd for Selector {
++    fn as_fd(&self) -> BorrowedFd<'_> {
++        self.port.as_fd()
++    }
++}
++
++impl AsRawFd for Selector {
++    fn as_raw_fd(&self) -> RawFd {
++        self.port.as_raw_fd()
++    }
++}
+-- 
+2.50.1
+
