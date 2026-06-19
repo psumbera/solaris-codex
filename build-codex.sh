@@ -1004,6 +1004,8 @@ export GN="${GN_INSTALL_DIR}/bin/gn"
 export RUSTY_V8_ARCHIVE="${V8_INSTALL_DIR}/lib/librusty_v8.a"
 export RUSTY_V8_SRC_BINDING_PATH="${V8_INSTALL_DIR}/share/src_binding.rs"
 export CARGO_PROFILE_RELEASE_LTO=false
+export CARGO_PROFILE_RELEASE_DEBUG=none
+export CARGO_PROFILE_RELEASE_STRIP=symbols
 export RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-C link-arg=-lstdc++ -C link-arg=-lssp"
 export LD_OPTIONS=
 export LD_EXEC_OPTIONS=
@@ -1019,7 +1021,9 @@ jobs=$(printf %s "${jobs}" | tr -cd '0-9')
 log "Building codex with ${jobs} jobs"
 (
   cd "${CODEX_SRC_DIR}"
-  "${CARGO}" build --release --offline -j "${jobs}" -p codex-cli --bin codex
+  # Avoid carrying Solaris local dynamic symbol names in the installed binary.
+  "${CARGO}" rustc --release --offline -j "${jobs}" -p codex-cli --bin codex -- \
+    -C link-arg=-z -C link-arg=noldynsym
 )
 
 mkdir -p "${CODEX_INSTALL_DIR}/bin"
