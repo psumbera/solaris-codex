@@ -13,10 +13,10 @@ Why it is needed:
   `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
 
 diff --git a/codex-rs/state/src/runtime.rs b/codex-rs/state/src/runtime.rs
-index 2937bf0..633c0d7 100644
+index 4b1d264..6a40994 100644
 --- a/codex-rs/state/src/runtime.rs
 +++ b/codex-rs/state/src/runtime.rs
-@@ -37,6 +37,8 @@ use codex_protocol::protocol::RolloutItem;
+@@ -38,6 +38,8 @@ use codex_protocol::protocol::RolloutItem;
  use log::LevelFilter;
  use serde_json::Value;
  use sqlx::ConnectOptions;
@@ -25,7 +25,7 @@ index 2937bf0..633c0d7 100644
  use sqlx::QueryBuilder;
  use sqlx::Row;
  use sqlx::Sqlite;
-@@ -46,9 +48,13 @@ use sqlx::migrate::Migrator;
+@@ -47,9 +49,13 @@ use sqlx::migrate::Migrator;
  use sqlx::sqlite::SqliteAutoVacuum;
  use sqlx::sqlite::SqliteConnectOptions;
  use sqlx::sqlite::SqliteJournalMode;
@@ -39,7 +39,7 @@ index 2937bf0..633c0d7 100644
  use std::path::Path;
  use std::path::PathBuf;
  use std::sync::Arc;
-@@ -347,11 +353,90 @@ async fn close_sqlite_pools(pools: &[&SqlitePool]) {
+@@ -359,11 +365,90 @@ async fn close_sqlite_pools(pools: &[&SqlitePool]) {
      }
  }
  
@@ -131,7 +131,7 @@ index 2937bf0..633c0d7 100644
          .synchronous(SqliteSynchronous::Normal)
          .busy_timeout(Duration::from_secs(5))
          .log_statements(LevelFilter::Off)
-@@ -398,6 +483,9 @@ async fn open_sqlite(
+@@ -410,6 +495,9 @@ async fn open_sqlite(
      spec: RuntimeDbSpec,
      telemetry_override: Option<&dyn DbTelemetry>,
  ) -> anyhow::Result<SqlitePool> {

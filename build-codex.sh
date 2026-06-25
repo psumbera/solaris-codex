@@ -1006,6 +1006,11 @@ export RUSTY_V8_SRC_BINDING_PATH="${V8_INSTALL_DIR}/share/src_binding.rs"
 export CARGO_PROFILE_RELEASE_LTO=false
 export CARGO_PROFILE_RELEASE_DEBUG=none
 export CARGO_PROFILE_RELEASE_STRIP=symbols
+# The upstream release profile's default opt/codegen settings can spend hours
+# in LLVM on large Codex crates on Solaris. Keep the installed binary stripped
+# and optimized, but use a profile that reliably finishes on the build hosts.
+export CARGO_PROFILE_RELEASE_OPT_LEVEL=${CARGO_PROFILE_RELEASE_OPT_LEVEL:-1}
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-16}
 export RUSTFLAGS="${RUSTFLAGS:+${RUSTFLAGS} }-C link-arg=-lstdc++ -C link-arg=-lssp"
 export LD_OPTIONS=
 export LD_EXEC_OPTIONS=
@@ -1014,9 +1019,9 @@ export LD_SHARED_OPTIONS=
 
 refresh_cached_rusty_v8_archive
 
-jobs=${SOLARIS_CODEX_JOBS:-$(psrinfo | wc -l 2>/dev/null || printf 40)}
+jobs=${SOLARIS_CODEX_JOBS:-4}
 jobs=$(printf %s "${jobs}" | tr -cd '0-9')
-[[ -n "${jobs}" ]] || jobs=40
+[[ -n "${jobs}" ]] || jobs=4
 
 log "Building codex with ${jobs} jobs"
 (

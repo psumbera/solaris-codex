@@ -12,7 +12,7 @@ Why it is needed:
   `cannot find value AI_CANONNAME in crate libc`
 
 diff --git a/codex-rs/config/src/host_name.rs b/codex-rs/config/src/host_name.rs
-index dcd34b0..b7f9936 100644
+index eb67b7b..1e93289 100644
 --- a/codex-rs/config/src/host_name.rs
 +++ b/codex-rs/config/src/host_name.rs
 @@ -10,6 +10,11 @@ use winapi_util::sysinfo::get_computer_name;
@@ -24,10 +24,10 @@ index dcd34b0..b7f9936 100644
 +#[cfg(not(target_os = "solaris"))]
 +const AI_CANONNAME_FLAG: i32 = libc::AI_CANONNAME;
 +
+ /// Returns a process-cached canonical hostname, falling back to the normalized
+ /// kernel hostname. The first call on Unix may perform blocking DNS resolution.
  pub fn host_name() -> Option<String> {
-     HOST_NAME.clone()
- }
-@@ -39,7 +44,7 @@ fn normalize_host_name(hostname: &str) -> Option<String> {
+@@ -41,7 +46,7 @@ fn normalize_host_name(hostname: &str) -> Option<String> {
  #[cfg(unix)]
  fn local_fqdn_for_hostname(hostname: &str) -> Option<String> {
      let hints = AddrInfoHints {

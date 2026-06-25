@@ -10,10 +10,10 @@ What it does:
   process-scoped there and do not model a separate live Codex process
 
 diff --git a/codex-rs/arg0/src/lib.rs b/codex-rs/arg0/src/lib.rs
-index 2102eaf..1b0e530 100644
+index 1c28f81..501a172 100644
 --- a/codex-rs/arg0/src/lib.rs
 +++ b/codex-rs/arg0/src/lib.rs
-@@ -484,17 +484,41 @@ fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
+@@ -485,17 +485,41 @@ fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
              continue;
          };
  
@@ -61,7 +61,7 @@ index 2102eaf..1b0e530 100644
  fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
      let lock_path = dir.join(LOCK_FILENAME);
      let lock_file = match File::options().read(true).write(true).open(&lock_path) {
-@@ -716,6 +740,10 @@ mod tests {
+@@ -717,6 +741,10 @@ mod tests {
      }
  
      #[test]
