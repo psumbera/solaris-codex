@@ -13,24 +13,25 @@ This was offered to upstream via:
 https://github.com/openai/codex/issues/4242
 
 diff --git a/codex-rs/exec-server/src/client/reqwest_http_client.rs b/codex-rs/exec-server/src/client/reqwest_http_client.rs
-index 9e22fc0..1862197 100644
+index d0cffa6..dd849de 100644
 --- a/codex-rs/exec-server/src/client/reqwest_http_client.rs
 +++ b/codex-rs/exec-server/src/client/reqwest_http_client.rs
-@@ -46,17 +46,23 @@ pub(crate) struct PendingReqwestHttpBodyStream {
+@@ -49,20 +49,25 @@ pub(crate) struct PendingReqwestHttpBodyStream {
  /// Validates `http/request` parameters and runs the actual `reqwest` call used
  /// by the exec-server route and the local [`HttpClient`] backend.
  pub(crate) struct ReqwestHttpRequestRunner {
 -    client: reqwest::Client,
 +    timeout_ms: Option<u64>,
++    redirect_policy: HttpRedirectPolicy,
  }
  
  impl ReqwestHttpClient {
--    fn build_client(timeout_ms: Option<u64>) -> Result<reqwest::Client, ExecServerError> {
--        let builder = match timeout_ms {
-+    fn build_client(
-+        timeout_ms: Option<u64>,
+     fn build_client(
+         timeout_ms: Option<u64>,
+         redirect_policy: HttpRedirectPolicy,
 +        url: &Url,
-+    ) -> Result<reqwest::Client, ExecServerError> {
+     ) -> Result<reqwest::Client, ExecServerError> {
+-        let builder = match timeout_ms {
 +        let mut builder = match timeout_ms {
              None => reqwest::Client::builder(),
              Some(timeout_ms) => {
@@ -40,32 +41,35 @@ index 9e22fc0..1862197 100644
 +        if request_matches_no_proxy(url) {
 +            builder = builder.no_proxy();
 +        }
-         build_reqwest_client_with_custom_ca(builder)
-             .map_err(|error| ExecServerError::HttpRequest(error.to_string()))
-     }
-@@ -112,9 +118,7 @@ impl HttpClient for ReqwestHttpClient {
- 
- impl ReqwestHttpRequestRunner {
-     pub(crate) fn new(timeout_ms: Option<u64>) -> Result<Self, JSONRPCErrorError> {
--        let client = ReqwestHttpClient::build_client(timeout_ms)
+         let builder = match redirect_policy {
+             HttpRedirectPolicy::Follow => builder,
+             HttpRedirectPolicy::Stop => builder.redirect(reqwest::redirect::Policy::none()),
+@@ -125,9 +130,10 @@ impl ReqwestHttpRequestRunner {
+         timeout_ms: Option<u64>,
+         redirect_policy: HttpRedirectPolicy,
+     ) -> Result<Self, JSONRPCErrorError> {
+-        let client = ReqwestHttpClient::build_client(timeout_ms, redirect_policy)
 -            .map_err(|error| internal_error(error.to_string()))?;
 -        Ok(Self { client })
-+        Ok(Self { timeout_ms })
++        Ok(Self {
++            timeout_ms,
++            redirect_policy,
++        })
      }
  
      pub(crate) async fn run(
-@@ -136,7 +140,9 @@ impl ReqwestHttpRequestRunner {
-         }
- 
-         let headers = Self::build_headers(params.headers)?;
+@@ -159,7 +165,9 @@ impl ReqwestHttpRequestRunner {
+         );
+         let mut headers = Self::build_headers(params.headers)?;
+         codex_otel::inject_span_w3c_trace_headers(&request_span, &mut headers);
 -        let mut request = self.client.request(method.clone(), url).headers(headers);
-+        let client = ReqwestHttpClient::build_client(self.timeout_ms, &url)
++        let client = ReqwestHttpClient::build_client(self.timeout_ms, self.redirect_policy, &url)
 +            .map_err(|error| internal_error(error.to_string()))?;
 +        let mut request = client.request(method.clone(), url).headers(headers);
          if let Some(body) = params.body {
              request = request.body(body.into_inner());
          }
-@@ -295,3 +301,98 @@ fn error_source_chain(error: &reqwest::Error) -> Option<String> {
+@@ -320,3 +328,98 @@ fn error_source_chain(error: &reqwest::Error) -> Option<String> {
      }
      (!sources.is_empty()).then(|| sources.join(": "))
  }

@@ -385,6 +385,7 @@ paths = [
     "src/poll.rs",
     "src/sys/unix/mod.rs",
     "src/sys/unix/selector/event_ports.rs",
+    "src/sys/unix/waker/event_ports.rs",
 ]
 
 data = json.loads(checksum_json.read_text())

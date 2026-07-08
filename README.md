@@ -61,7 +61,7 @@ build/install/codex/bin/codex --version
 - The wrapper uses the official Solaris Rust standalone installer target
   `x86_64-pc-solaris`.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.142.5`, built from its `codex-rs/` workspace.
+  `rust-v0.143.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -111,7 +111,7 @@ vendored-crate rewrites in place:
 
 Those helpers remain scripted because they also update vendored crate
 `.cargo-checksum.json`, which makes static patch files awkward to maintain.
-The mio event-ports rewrite applies the upstream proposal from
+The mio event-ports rewrite applies the upstream accepted changes from
 `https://github.com/tokio-rs/mio/pull/1962`, refreshed against the `mio 1.2.0`
 crate version locked by Codex.
 
