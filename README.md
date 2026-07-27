@@ -61,7 +61,7 @@ build/install/codex/bin/codex --version
 - The wrapper uses the official Solaris Rust standalone installer target
   `x86_64-pc-solaris`.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.144.6`, built from its `codex-rs/` workspace.
+  `rust-v0.145.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
