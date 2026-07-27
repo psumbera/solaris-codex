@@ -1,12 +1,15 @@
-# solaris-codex
+# OpenAI Codex CLI for Oracle Solaris 11.4
 
-Standalone Solaris build wrapper for Codex and its native dependencies.
+Build and run the OpenAI Codex CLI on Oracle Solaris 11.4 x86. This
+standalone Solaris Codex build wrapper fetches pinned upstream sources, applies
+the required Solaris-specific patches, and builds Codex together with its
+native dependencies.
 
 This repo fetches and builds pinned versions of:
 
 1. `gn`
 2. `v8-solaris` (`librusty_v8.a` + `src_binding.rs`)
-3. `codex`
+3. [`openai/codex`](https://github.com/openai/codex)
 
 Current support status:
 
