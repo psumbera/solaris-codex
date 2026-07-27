@@ -1032,7 +1032,13 @@ log "Building codex with ${jobs} jobs"
     -C link-arg=-z -C link-arg=noldynsym
 )
 
-mkdir -p "${CODEX_INSTALL_DIR}/bin"
-cp "${CODEX_SRC_DIR}/target/release/codex" "${CODEX_INSTALL_DIR}/bin/codex"
+codex_install_dir="${CODEX_INSTALL_DIR}/bin"
+mkdir -p "${codex_install_dir}"
+(
+  codex_install_tmp=$(mktemp "${codex_install_dir}/.codex.XXXXXX")
+  trap 'rm -f "${codex_install_tmp}"' EXIT
+  cp -p "${CODEX_SRC_DIR}/target/release/codex" "${codex_install_tmp}"
+  mv -f "${codex_install_tmp}" "${codex_install_dir}/codex"
+)
 
-log "Installed codex to ${CODEX_INSTALL_DIR}/bin/codex"
+log "Installed codex to ${codex_install_dir}/codex"
