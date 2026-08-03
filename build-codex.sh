@@ -413,6 +413,7 @@ text = tui_rs.read_text()
 old = """use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableFocusChange;
 use crossterm::event::EnableBracketedPaste;
+#[cfg(not(windows))]
 use crossterm::event::EnableFocusChange;
 """
 new = """#[cfg(not(target_os = \"solaris\"))]
@@ -421,7 +422,7 @@ use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableFocusChange;
 #[cfg(not(target_os = \"solaris\"))]
 use crossterm::event::EnableBracketedPaste;
-#[cfg(not(target_os = \"solaris\"))]
+#[cfg(all(not(windows), not(target_os = \"solaris\")))]
 use crossterm::event::EnableFocusChange;
 """
 if new not in text:
@@ -435,6 +436,8 @@ old = """pub fn set_modes() -> Result<()> {
     execute!(stdout(), EnableBracketedPaste)?;
 
     enable_raw_mode()?;
+    #[cfg(windows)]
+    windows_console::set_input_record_mode()?;
     // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
     // chat_composer.rs is using a keyboard event listener to enter for any modified keys
     // to create a new line that require this.
@@ -443,7 +446,10 @@ old = """pub fn set_modes() -> Result<()> {
     // gracefully if unsupported.
     keyboard_modes::enable_keyboard_enhancement();
 
+    #[cfg(not(windows))]
     let _ = execute!(stdout(), EnableFocusChange);
+    #[cfg(windows)]
+    let _ = execute!(stdout(), DisableFocusChange);
     Ok(())
 }
 """
@@ -451,6 +457,8 @@ new = """pub fn set_modes() -> Result<()> {
     ensure_virtual_terminal_processing()?;
 
     enable_raw_mode()?;
+    #[cfg(windows)]
+    windows_console::set_input_record_mode()?;
 
     #[cfg(not(target_os = \"solaris\"))]
     {
@@ -464,7 +472,10 @@ new = """pub fn set_modes() -> Result<()> {
         // gracefully if unsupported.
         keyboard_modes::enable_keyboard_enhancement();
 
+        #[cfg(not(windows))]
         let _ = execute!(stdout(), EnableFocusChange);
+        #[cfg(windows)]
+        let _ = execute!(stdout(), DisableFocusChange);
     }
 
     Ok(())
@@ -635,7 +646,21 @@ impl Default for CrosstermEventSource {
 
 impl EventSource for CrosstermEventSource {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
-        Pin::new(&mut self.get_mut().0).poll_next(cx)
+        // Crossterm's Windows backend expects Win32 input records. If VT input is inherited or
+        // restored by another console client, navigation keys arrive as literal escape bytes.
+        #[cfg(windows)]
+        let _ = super::windows_console::ensure_input_record_mode();
+
+        let result = Pin::new(&mut self.get_mut().0).poll_next(cx);
+
+        // EventStream starts its blocking reader before returning Pending, so reassert the mode
+        // after that transition as well.
+        #[cfg(windows)]
+        if result.is_pending() {
+            let _ = super::windows_console::ensure_input_record_mode();
+        }
+
+        result
     }
 }
 """
@@ -653,7 +678,21 @@ impl Default for CrosstermEventSource {
 #[cfg(not(target_os = \"solaris\"))]
 impl EventSource for CrosstermEventSource {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EventResult>> {
-        Pin::new(&mut self.get_mut().0).poll_next(cx)
+        // Crossterm's Windows backend expects Win32 input records. If VT input is inherited or
+        // restored by another console client, navigation keys arrive as literal escape bytes.
+        #[cfg(windows)]
+        let _ = super::windows_console::ensure_input_record_mode();
+
+        let result = Pin::new(&mut self.get_mut().0).poll_next(cx);
+
+        // EventStream starts its blocking reader before returning Pending, so reassert the mode
+        // after that transition as well.
+        #[cfg(windows)]
+        if result.is_pending() {
+            let _ = super::windows_console::ensure_input_record_mode();
+        }
+
+        result
     }
 }
 
