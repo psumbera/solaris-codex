@@ -41,7 +41,7 @@ bash build-codex.sh
 5. installs the pinned `bindgen-cli` helper needed by the V8 GN build
 6. builds and installs `gn`
 7. builds and installs `v8-solaris`
-8. builds and installs `codex`
+8. builds and installs `codex` and its code-mode host
 
 Installed artifacts end up in:
 
@@ -49,6 +49,10 @@ Installed artifacts end up in:
 - `build/install/v8/lib/librusty_v8.a`
 - `build/install/v8/share/src_binding.rs`
 - `build/install/codex/bin/codex`
+- `build/install/codex/bin/codex-code-mode-host`
+
+Codex 0.147 enables the separate code-mode host by default. Keep
+`codex-code-mode-host` beside `codex` when copying or packaging this build.
 
 Quick verification:
 
@@ -56,6 +60,7 @@ Quick verification:
 build/install/gn/bin/gn --version
 ls -l build/install/v8/lib/librusty_v8.a
 build/install/codex/bin/codex --version
+build/install/codex/bin/codex-code-mode-host --help
 ```
 
 ## Notes

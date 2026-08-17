@@ -1063,21 +1063,26 @@ jobs=${SOLARIS_CODEX_JOBS:-4}
 jobs=$(printf %s "${jobs}" | tr -cd '0-9')
 [[ -n "${jobs}" ]] || jobs=4
 
-log "Building codex with ${jobs} jobs"
+log "Building codex and codex-code-mode-host with ${jobs} jobs"
 (
   cd "${CODEX_SRC_DIR}"
   # Avoid carrying Solaris local dynamic symbol names in the installed binary.
   "${CARGO}" rustc --release --offline -j "${jobs}" -p codex-cli --bin codex -- \
     -C link-arg=-z -C link-arg=noldynsym
+  "${CARGO}" rustc --release --offline -j "${jobs}" \
+    -p codex-code-mode-host --bin codex-code-mode-host -- \
+    -C link-arg=-z -C link-arg=noldynsym
 )
 
 codex_install_dir="${CODEX_INSTALL_DIR}/bin"
 mkdir -p "${codex_install_dir}"
-(
-  codex_install_tmp=$(mktemp "${codex_install_dir}/.codex.XXXXXX")
-  trap 'rm -f "${codex_install_tmp}"' EXIT
-  cp -p "${CODEX_SRC_DIR}/target/release/codex" "${codex_install_tmp}"
-  mv -f "${codex_install_tmp}" "${codex_install_dir}/codex"
-)
+for codex_executable in codex codex-code-mode-host; do
+  (
+    codex_install_tmp=$(mktemp "${codex_install_dir}/.${codex_executable}.XXXXXX")
+    trap 'rm -f "${codex_install_tmp}"' EXIT
+    cp -p "${CODEX_SRC_DIR}/target/release/${codex_executable}" "${codex_install_tmp}"
+    mv -f "${codex_install_tmp}" "${codex_install_dir}/${codex_executable}"
+  )
+done
 
-log "Installed codex to ${codex_install_dir}/codex"
+log "Installed codex and codex-code-mode-host to ${codex_install_dir}"

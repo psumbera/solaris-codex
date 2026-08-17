@@ -9,8 +9,8 @@ Why it is needed:
 - without it, GCC on Solaris fails the V8 147.4.0 build with unresolved
   std::unique_ptr and std::make_unique_for_overwrite declarations
 
---- a/v8-149.2.0/v8/src/bigint/bigint.h
-+++ b/v8-149.2.0/v8/src/bigint/bigint.h
+--- a/v8-150.4.0/v8/src/bigint/bigint.h
++++ b/v8-150.4.0/v8/src/bigint/bigint.h
 @@ -10,6 +10,7 @@
  #include <algorithm>
  #include <cstring>

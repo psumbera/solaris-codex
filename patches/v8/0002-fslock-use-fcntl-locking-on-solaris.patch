@@ -10,8 +10,8 @@ Why it is needed:
 - without it, the `v8-solaris` crate cannot use the vendored `fslock` crate
   correctly on Solaris
 
---- a/v8-149.2.0-vendored-sources/fslock/src/unix.rs
-+++ b/v8-149.2.0-vendored-sources/fslock/src/unix.rs
+--- a/v8-150.4.0-vendored-sources/fslock/src/unix.rs
++++ b/v8-150.4.0-vendored-sources/fslock/src/unix.rs
 @@ -317,7 +317,27 @@
      }
  }

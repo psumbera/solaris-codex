@@ -10,8 +10,8 @@ Why it is needed:
 - without it, the build looks for the wrong Rust stdlib directory instead of
   the Solaris standalone toolchain target triple
 
---- a/v8-149.2.0/build/config/rust.gni
-+++ b/v8-149.2.0/build/config/rust.gni
+--- a/v8-150.4.0/build/config/rust.gni
++++ b/v8-150.4.0/build/config/rust.gni
 @@ -63,6 +63,11 @@
    # the bindgen exectuable).
    rust_bindgen_root = "//third_party/rust-toolchain"
@@ -35,8 +35,8 @@ Why it is needed:
    if (current_cpu == "arm64") {
      rust_abi_target = "aarch64-unknown-linux-gnu"
    } else if (current_cpu == "x86") {
---- a/v8-149.2.0/build/rust/known-target-triples.txt
-+++ b/v8-149.2.0/build/rust/known-target-triples.txt
+--- a/v8-150.4.0/build/rust/known-target-triples.txt
++++ b/v8-150.4.0/build/rust/known-target-triples.txt
 @@ -39,6 +39,7 @@
  x86_64-apple-tvos
  x86_64-linux-android

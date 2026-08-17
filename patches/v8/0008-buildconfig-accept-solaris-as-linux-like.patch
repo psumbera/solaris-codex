@@ -11,8 +11,8 @@ Why it is needed:
 - without it, GN refuses the expected toolchain path setup for the Solaris V8
   wrapper build
 
---- a/v8-149.2.0/build/config/BUILDCONFIG.gn
-+++ b/v8-149.2.0/build/config/BUILDCONFIG.gn
+--- a/v8-150.4.0/build/config/BUILDCONFIG.gn
++++ b/v8-150.4.0/build/config/BUILDCONFIG.gn
 @@ -243,7 +243,7 @@
    # Targeting android on Mac is best-effort and not guaranteed to work.
    assert(host_os == "linux", "Android builds are only supported on Linux.")

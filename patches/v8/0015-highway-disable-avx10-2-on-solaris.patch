@@ -8,8 +8,8 @@ Why it is needed:
 - without it, Highway can enable instructions that the Solaris compiler or
   assembler path cannot handle reliably
 
---- a/v8-149.2.0/third_party/highway/src/hwy/detect_targets.h
-+++ b/v8-149.2.0/third_party/highway/src/hwy/detect_targets.h
+--- a/v8-150.4.0/third_party/highway/src/hwy/detect_targets.h
++++ b/v8-150.4.0/third_party/highway/src/hwy/detect_targets.h
 @@ -198,7 +198,7 @@
  // AVX10_2 requires clang >= 20.1 (postpone to 23 due to "avx10.2-512" remnant,
  // only removed in https://github.com/llvm/llvm-project/pull/157034) or

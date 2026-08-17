@@ -180,8 +180,9 @@ PY
 }
 patch_gcc_toolchain_ar() {
   local gcc_toolchain=${V8_SRC_DIR}/build/toolchain/gcc_toolchain.gni
+  local linux_toolchain=${V8_SRC_DIR}/build/toolchain/linux/BUILD.gn
 
-  python3 - "${gcc_toolchain}" <<'PY'
+  python3 - "${gcc_toolchain}" "${linux_toolchain}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -193,6 +194,28 @@ if 'target_os == "solaris"' not in text:
     if old not in text:
         raise SystemExit("failed to patch gcc_toolchain.gni alink block")
     text = text.replace(old, new, 1)
+p.write_text(text)
+
+# Recent GN versions track the archiver executable as an explicit Ninja input.
+# A bare "ar" is then interpreted relative to the output directory rather than
+# resolved through PATH.  Use Solaris' absolute archiver path for every
+# toolchain instantiated during this native build.
+p = Path(sys.argv[2])
+text = p.read_text()
+old = '  ar = "ar"\n'
+invalid = '  ar = target_os == "solaris" ? "/usr/bin/ar" : "ar"\n'
+new = '''  ar = "ar"
+  if (target_os == "solaris") {
+    ar = "/usr/bin/ar"
+  }
+'''
+if new not in text:
+    if invalid in text:
+        text = text.replace(invalid, new)
+    elif old in text:
+        text = text.replace(old, new)
+    else:
+        raise SystemExit("failed to patch linux/BUILD.gn ar assignments")
 p.write_text(text)
 PY
 }
@@ -333,14 +356,28 @@ if new not in text:
         raise SystemExit("failed to patch first thin_archive branch")
     text = text.replace(old, new, 1)
 
-old = """  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
-"""
-new = """  } else if ((is_posix && target_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
-"""
-if new not in text:
-    if old not in text:
+second_branch_variants = [
+    (
+        '  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {\n',
+        '  } else if ((is_posix && target_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {\n',
+    ),
+    (
+        '  } else if ((is_posix && (!is_apple || use_lld)) || is_fuchsia) {\n',
+        '  } else if ((is_posix && target_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {\n',
+    ),
+    (
+        '  } else if ((is_posix && (!is_apple || (use_lld || use_mold))) || is_fuchsia) {\n',
+        '  } else if ((is_posix && target_os != "solaris" &&\n'
+        '              (!is_apple || (use_lld || use_mold))) || is_fuchsia) {\n',
+    ),
+]
+if 'is_posix && target_os != "solaris"' not in text:
+    for old, new in second_branch_variants:
+        if old in text:
+            text = text.replace(old, new, 1)
+            break
+    else:
         raise SystemExit("failed to patch second thin_archive branch")
-    text = text.replace(old, new, 1)
 
 p.write_text(text)
 PY

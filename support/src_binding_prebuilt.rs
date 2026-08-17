@@ -894,11 +894,11 @@ pub use self::v8_GCCallbackFlags as v8__GCCallbackFlags;
 pub use self::v8_GCType as v8__GCType;
 #[doc = " Interceptor callbacks use this value to indicate whether the request was\n intercepted or not.\n\n The values for constants and type are chosen this way for better\n performance."]
 pub use self::v8_Intercepted as v8__Intercepted;
-pub const v8__MAJOR_VERSION: u32 = 14;
-pub const v8__MINOR_VERSION: u32 = 9;
-pub const v8__BUILD_NUMBER: u32 = 207;
+pub const v8__MAJOR_VERSION: u32 = 15;
+pub const v8__MINOR_VERSION: u32 = 0;
+pub const v8__BUILD_NUMBER: u32 = 245;
 pub const v8__PATCH_LEVEL: u32 = 2;
-pub const v8__VERSION_STRING: &::std::ffi::CStr = c"14.9.207.2-rusty";
+pub const v8__VERSION_STRING: &::std::ffi::CStr = c"15.0.245.2-rusty";
 #[repr(C)]
 #[derive(Debug)]
 pub struct ExternalConstOneByteStringResource {
