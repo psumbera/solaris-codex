@@ -13,10 +13,10 @@ Why it is needed:
   `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
 
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index ca6f224..e141672 100644
+index 6c18670..62cf953 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -3,16 +3,100 @@
+@@ -13,6 +13,8 @@ use crate::telemetry::DbKind;
  use codex_utils_absolute_path::AbsolutePathBuf;
  use log::LevelFilter;
  use sqlx::ConnectOptions;
@@ -24,6 +24,8 @@ index ca6f224..e141672 100644
 +use sqlx::Connection;
  use sqlx::Error;
  use sqlx::SqlitePool;
+ use sqlx::migrate::Migrator;
+@@ -19,8 +21,12 @@ use sqlx::migrate::Migrator;
  use sqlx::sqlite::SqliteAutoVacuum;
  use sqlx::sqlite::SqliteConnectOptions;
  use sqlx::sqlite::SqliteJournalMode;
@@ -34,9 +36,11 @@ index ca6f224..e141672 100644
 +#[cfg(target_os = "solaris")]
 +use std::ffi::OsString;
  use std::path::Path;
-+#[cfg(target_os = "solaris")]
-+use std::path::PathBuf;
+ use std::path::PathBuf;
  use std::time::Duration;
+@@ -33,6 +39,82 @@ const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
+ const STATE_DB_FILENAME: &str = "state_5.sqlite";
+ const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
  
 +fn default_sqlite_journal_mode() -> SqliteJournalMode {
 +    if cfg!(target_os = "solaris") {
@@ -114,10 +118,10 @@ index ca6f224..e141672 100644
 +    Ok(())
 +}
 +
- /// Resolved configuration shared by all Codex SQLite connections.
- #[derive(Clone, Debug, Eq, PartialEq)]
- pub struct SqliteConfig {
-@@ -35,9 +119,12 @@ impl SqliteConfig {
+ #[derive(Clone, Copy)]
+ struct RuntimeDbSpec {
+     label: &'static str,
+@@ -277,9 +359,12 @@ impl SqliteConfig {
      /// Open a writable Codex SQLite database, creating it if necessary.
      pub async fn open_read_write_pool(&self, path: &Path) -> Result<SqlitePool, Error> {
 +        #[cfg(target_os = "solaris")]

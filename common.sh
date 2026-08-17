@@ -236,15 +236,20 @@ apply_patch_series() {
     [[ -e "${patch}" ]] || continue
     if (
       cd "${root}"
-      "${PATCH_TOOL}" --dry-run -p1 < "${patch}" >/dev/null 2>&1
+      "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -p1 < "${patch}" >/dev/null 2>&1
     ); then
       log "Applying $(basename "${patch}")"
       (
         cd "${root}"
-        "${PATCH_TOOL}" -p1 < "${patch}"
+        "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${patch}"
       )
+    elif (
+      cd "${root}"
+      "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -R -p1 < "${patch}" >/dev/null 2>&1
+    ); then
+      log "Already applied $(basename "${patch}")"
     else
-      log "Skipping $(basename "${patch}")"
+      die "patch does not apply cleanly: ${patch}"
     fi
   done
 }

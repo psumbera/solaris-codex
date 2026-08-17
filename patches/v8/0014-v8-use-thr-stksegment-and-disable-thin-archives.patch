@@ -11,15 +11,28 @@ Why it is needed:
 
 --- a/v8-149.2.0/build/config/compiler/BUILD.gn
 +++ b/v8-149.2.0/build/config/compiler/BUILD.gn
-@@ -2616,7 +2616,7 @@
+@@ -2629,17 +2629,18 @@
+ # 2. Remove the thin_archive config, so that the .a file actually contains all
+ #    .o files, instead of just references to .o files in the build directoy
+ config("thin_archive") {
+-  if ((is_apple && use_lld) || (is_linux && !is_clang) || current_os == "aix" ||
+-      current_os == "zos") {
++  if ((is_apple && use_lld) ||
++      (is_linux && target_os != "solaris" && !is_clang) ||
++      current_os == "aix" || current_os == "zos") {
+     # The macOS and iOS linker ld64.ldd doesn't support thin archive without
+     # symbol table, gcc on linux also throws the error `archive has no index`.
+     # AIX does support -s option, not -S option.
+     arflags = [
        "-T",
        "-s",
      ]
 -  } else if ((is_posix && (!is_apple || use_lld)) || is_fuchsia) {
-+  } else if ((is_posix && current_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
++  } else if ((is_posix && target_os != "solaris" && (!is_apple || use_lld)) || is_fuchsia) {
      # The macOS and iOS default linker ld64 does not support reading thin
      # archives.
      arflags = [
+       "-T",
 --- a/v8-149.2.0/v8/src/base/platform/platform-solaris.cc
 +++ b/v8-149.2.0/v8/src/base/platform/platform-solaris.cc
 @@ -18,6 +18,7 @@

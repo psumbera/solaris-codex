@@ -21,7 +21,7 @@ index 812d767..1286e8f 100644
  use tokio::io::AsyncWriteExt;
  use tokio::process::Command;
  
-@@ -302,6 +303,25 @@ async fn run_command(
+@@ -300,6 +301,25 @@ async fn run_command(
      request_json: Vec<u8>,
  ) -> Result<FsHelperPayload, JSONRPCErrorError> {
      let mut child = spawn_command(command)?;
@@ -47,7 +47,7 @@ index 812d767..1286e8f 100644
      let mut stdin = child
          .stdin
          .take()
-@@ -310,15 +330,17 @@ async fn run_command(
+@@ -308,15 +328,17 @@ async fn run_command(
      stdin.shutdown().await.map_err(io_error)?;
      drop(stdin);
  
@@ -70,7 +70,7 @@ index 812d767..1286e8f 100644
      match response {
          FsHelperResponse::Ok(payload) => Ok(payload),
          FsHelperResponse::Error(error) => Err(error),
-@@ -361,6 +383,10 @@ fn io_error(err: std::io::Error) -> JSONRPCErrorError {
+@@ -359,6 +381,10 @@ fn io_error(err: std::io::Error) -> JSONRPCErrorError {
      internal_error(err.to_string())
  }
  
@@ -81,7 +81,7 @@ index 812d767..1286e8f 100644
  fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
      internal_error(format!(
          "failed to encode or decode fs sandbox helper message: {err}"
-@@ -678,6 +704,58 @@ mod tests {
+@@ -682,6 +708,58 @@ mod tests {
          assert!(policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
  

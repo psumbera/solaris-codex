@@ -11,7 +11,13 @@ Why it is needed:
 
 --- a/v8-149.2.0/third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2/bindings/cpp/temporal_rs/diplomat_runtime.hpp
 +++ b/v8-149.2.0/third_party/rust/chromium_crates_io/vendor/temporal_capi-v0_2/bindings/cpp/temporal_rs/diplomat_runtime.hpp
-@@ -392,1 +392,3 @@
+@@ -389,7 +389,9 @@
+ MAKE_SLICE_CONVERTERS(F64, double)
+ MAKE_SLICE_CONVERTERS(Bool, bool)
+ MAKE_SLICE_CONVERTERS(Char, char32_t)
 +#if !defined(__sun)
  MAKE_SLICE_CONVERTERS(String, char)
 +#endif
+ MAKE_SLICE_CONVERTERS(String16, char16_t)
+ 
+ template<typename T>

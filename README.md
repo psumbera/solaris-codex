@@ -64,7 +64,7 @@ build/install/codex/bin/codex --version
 - The wrapper uses the official Solaris Rust standalone installer target
   `x86_64-pc-solaris`.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.146.0`, built from its `codex-rs/` workspace.
+  `rust-v0.147.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -91,9 +91,9 @@ patch series under `patches/codex/` before vendoring:
   startup.
 - `0007-app-server-daemon-use-fcntl-locks-on-solaris.patch` replaces
   unsupported `flock(2)` daemon lifecycle locks with Solaris `fcntl(2)` locks.
-- `0008-http-client-honor-no-proxy-before-system-proxy.patch` makes
-  exec-server HTTP requests honor `NO_PROXY`/`no_proxy` hosts before reqwest's
-  system proxy lookup.
+- `0008-http-client-honor-no-proxy-before-system-proxy.patch` enables Codex's
+  route-aware system-proxy policy by default on Solaris so shared HTTP clients
+  honor `NO_PROXY`/`no_proxy` without reqwest system proxy autodetection.
 - `0010-exec-server-drain-fs-helper-output-concurrently.patch` keeps large
   filesystem-helper responses from blocking on a full stdout pipe.
 

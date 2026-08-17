@@ -13,7 +13,7 @@ Why it is needed:
 
 --- a/v8-149.2.0/build/rust/gni_impl/filter_clang_args.py
 +++ b/v8-149.2.0/build/rust/gni_impl/filter_clang_args.py
-@@ -12,6 +12,13 @@
+@@ -12,21 +12,30 @@
  This function filters them out.
  """
  
@@ -27,10 +27,18 @@ Why it is needed:
  
  def filter_clang_args(clangargs):
  
-@@ -25,6 +32,8 @@
+   def do_filter(args):
+     i = 0
+     while i < len(args):
+       # Intercept plugin arguments
+       if args[i] == '-Xclang':
+         i += 1
+         if args[i] == '-add-plugin':
            pass
          elif args[i].startswith('-plugin-arg'):
            i += 2
+       elif args[i] == '-ftime-trace':
+         pass
 +      elif args[i] in BLOCKLIST:
 +        pass
        else:

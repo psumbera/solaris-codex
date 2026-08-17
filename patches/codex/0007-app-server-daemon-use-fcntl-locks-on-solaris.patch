@@ -14,7 +14,7 @@ diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server
 index b525e61..68c85dc 100644
 --- a/codex-rs/app-server-daemon/src/backend/pid.rs
 +++ b/codex-rs/app-server-daemon/src/backend/pid.rs
-@@ -589,7 +589,7 @@ enum EmptyPidReservation {
+@@ -599,7 +599,7 @@ enum EmptyPidReservation {
      Record(PidRecord),
  }
  
@@ -23,7 +23,7 @@ index b525e61..68c85dc 100644
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -605,6 +605,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
+@@ -615,6 +615,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
      Err(err).context("failed to lock pid reservation")
  }
  
@@ -63,7 +63,7 @@ diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/
 index 5870075..95ff316 100644
 --- a/codex-rs/app-server-daemon/src/lib.rs
 +++ b/codex-rs/app-server-daemon/src/lib.rs
-@@ -831,7 +831,7 @@ fn should_reexec_updater(
+@@ -826,7 +826,7 @@ fn should_reexec_updater(
          && outcome == RestartIfRunningOutcome::Restarted
  }
  
@@ -72,7 +72,7 @@ index 5870075..95ff316 100644
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -847,6 +847,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+@@ -842,6 +842,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      Err(err).context("failed to lock daemon operation")
  }
  
