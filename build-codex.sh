@@ -348,30 +348,50 @@ patch_vendored_mio_event_ports() {
   local mio_root=${CODEX_VENDOR_DIR}/mio
   local checksum_json=${mio_root}/.cargo-checksum.json
   local event_ports_rs=${mio_root}/src/sys/unix/selector/event_ports.rs
+  local base_patch=${TOP}/patches/mio/0001-selector-use-solaris-event-ports.patch
+  local cache_stamp=${CODEX_SRC_DIR}/target/.solaris-mio-event-ports.sha256
+  local event_ports_hash
+  local cached_hash=
   local patch
 
   [[ -d "${mio_root}" ]] || die "missing vendored mio source: ${mio_root}"
   [[ -f "${checksum_json}" ]] || die "missing vendored mio checksum: ${checksum_json}"
 
   if [[ ! -f "${event_ports_rs}" ]]; then
-    for patch in "${TOP}/patches/mio"/*.patch; do
-      [[ -e "${patch}" ]] || die "missing mio Solaris event ports patch"
-      if (
-        cd "${mio_root}"
-        "${PATCH_TOOL}" --dry-run -p1 < "${patch}" >/dev/null 2>&1
-      ); then
-        log "Applying vendored mio $(basename "${patch}")"
-        (
-          cd "${mio_root}"
-          "${PATCH_TOOL}" -p1 < "${patch}"
-        )
-      else
-        die "failed to apply vendored mio patch: ${patch}"
-      fi
-    done
+    [[ -f "${base_patch}" ]] || die "missing mio Solaris event ports patch: ${base_patch}"
+    log "Applying vendored mio $(basename "${base_patch}")"
+    (
+      cd "${mio_root}"
+      "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${base_patch}"
+    ) || die "failed to apply vendored mio patch: ${base_patch}"
   fi
 
   [[ -f "${event_ports_rs}" ]] || die "vendored mio Solaris event ports source was not created"
+
+  # Newer Mio revisions may already contain the base event-ports
+  # implementation. Apply Solaris correctness fixes independently so they are
+  # also used when the base patch is unnecessary.
+  for patch in "${TOP}/patches/mio"/*.patch; do
+    [[ -e "${patch}" ]] || continue
+    [[ "${patch}" == "${base_patch}" ]] && continue
+    if (
+      cd "${mio_root}"
+      "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -p1 < "${patch}" >/dev/null 2>&1
+    ); then
+      log "Applying vendored mio $(basename "${patch}")"
+      (
+        cd "${mio_root}"
+        "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${patch}"
+      )
+    elif (
+      cd "${mio_root}"
+      "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -R -p1 < "${patch}" >/dev/null 2>&1
+    ); then
+      log "Already applied vendored mio $(basename "${patch}")"
+    else
+      die "failed to apply vendored mio patch: ${patch}"
+    fi
+  done
 
   python3 - "${mio_root}" "${checksum_json}" <<'PY2'
 from pathlib import Path
@@ -397,6 +417,30 @@ for rel in paths:
     files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
 checksum_json.write_text(json.dumps(data, separators=(",", ":")))
 PY2
+
+  # Cargo assumes registry sources are immutable and can retain a stale Mio
+  # artifact after a vendored source patch changes. Invalidate only when the
+  # patched selector content changes so ordinary rebuilds keep their cache.
+  event_ports_hash=$(python3 - "${event_ports_rs}" <<'PY2'
+from pathlib import Path
+import hashlib
+import sys
+
+print(hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
+PY2
+)
+  if [[ -f "${cache_stamp}" ]]; then
+    cached_hash=$(<"${cache_stamp}")
+  fi
+  if [[ "${cached_hash}" != "${event_ports_hash}" ]]; then
+    log "Invalidating cached mio artifacts after Solaris selector update"
+    (
+      cd "${CODEX_SRC_DIR}"
+      "${CARGO}" clean -p mio --release
+    )
+    mkdir -p "$(dirname "${cache_stamp}")"
+    printf '%s\n' "${event_ports_hash}" > "${cache_stamp}"
+  fi
 }
 
 patch_tui_solaris_terminal_input() {
