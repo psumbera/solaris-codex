@@ -350,48 +350,75 @@ patch_vendored_mio_event_ports() {
   local event_ports_rs=${mio_root}/src/sys/unix/selector/event_ports.rs
   local base_patch=${TOP}/patches/mio/0001-selector-use-solaris-event-ports.patch
   local cache_stamp=${CODEX_SRC_DIR}/target/.solaris-mio-event-ports.sha256
+  local patch_stamp=${mio_root}/.solaris-mio-patch-series.sha256
   local event_ports_hash
   local cached_hash=
+  local patch_series_hash
+  local cached_patch_series_hash=
   local patch
 
   [[ -d "${mio_root}" ]] || die "missing vendored mio source: ${mio_root}"
   [[ -f "${checksum_json}" ]] || die "missing vendored mio checksum: ${checksum_json}"
 
-  if [[ ! -f "${event_ports_rs}" ]]; then
-    [[ -f "${base_patch}" ]] || die "missing mio Solaris event ports patch: ${base_patch}"
-    log "Applying vendored mio $(basename "${base_patch}")"
-    (
-      cd "${mio_root}"
-      "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${base_patch}"
-    ) || die "failed to apply vendored mio patch: ${base_patch}"
+  patch_series_hash=$(python3 - "${TOP}/patches/mio" <<'PY2'
+from pathlib import Path
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+for path in sorted(Path(sys.argv[1]).glob("*.patch")):
+    digest.update(path.name.encode())
+    digest.update(b"\0")
+    digest.update(path.read_bytes())
+print(digest.hexdigest())
+PY2
+)
+  if [[ -f "${patch_stamp}" ]]; then
+    cached_patch_series_hash=$(<"${patch_stamp}")
+  fi
+
+  if [[ "${cached_patch_series_hash}" == "${patch_series_hash}" ]]; then
+    log "Already applied vendored mio Solaris patch series"
+  else
+    if [[ ! -f "${event_ports_rs}" ]]; then
+      [[ -f "${base_patch}" ]] || die "missing mio Solaris event ports patch: ${base_patch}"
+      log "Applying vendored mio $(basename "${base_patch}")"
+      (
+        cd "${mio_root}"
+        "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${base_patch}"
+      ) || die "failed to apply vendored mio patch: ${base_patch}"
+    fi
+
+    [[ -f "${event_ports_rs}" ]] || die "vendored mio Solaris event ports source was not created"
+
+    # Newer Mio revisions may already contain the base event-ports
+    # implementation. Apply Solaris correctness fixes independently so they are
+    # also used when the base patch is unnecessary.
+    for patch in "${TOP}/patches/mio"/*.patch; do
+      [[ -e "${patch}" ]] || continue
+      [[ "${patch}" == "${base_patch}" ]] && continue
+      if (
+        cd "${mio_root}"
+        "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -p1 < "${patch}" >/dev/null 2>&1
+      ); then
+        log "Applying vendored mio $(basename "${patch}")"
+        (
+          cd "${mio_root}"
+          "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${patch}"
+        )
+      elif (
+        cd "${mio_root}"
+        "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -R -p1 < "${patch}" >/dev/null 2>&1
+      ); then
+        log "Already applied vendored mio $(basename "${patch}")"
+      else
+        die "failed to apply vendored mio patch: ${patch}"
+      fi
+    done
+    printf '%s\n' "${patch_series_hash}" > "${patch_stamp}"
   fi
 
   [[ -f "${event_ports_rs}" ]] || die "vendored mio Solaris event ports source was not created"
-
-  # Newer Mio revisions may already contain the base event-ports
-  # implementation. Apply Solaris correctness fixes independently so they are
-  # also used when the base patch is unnecessary.
-  for patch in "${TOP}/patches/mio"/*.patch; do
-    [[ -e "${patch}" ]] || continue
-    [[ "${patch}" == "${base_patch}" ]] && continue
-    if (
-      cd "${mio_root}"
-      "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -p1 < "${patch}" >/dev/null 2>&1
-    ); then
-      log "Applying vendored mio $(basename "${patch}")"
-      (
-        cd "${mio_root}"
-        "${PATCH_TOOL}" --batch --forward --fuzz=0 -p1 < "${patch}"
-      )
-    elif (
-      cd "${mio_root}"
-      "${PATCH_TOOL}" --dry-run --batch --forward --fuzz=0 -R -p1 < "${patch}" >/dev/null 2>&1
-    ); then
-      log "Already applied vendored mio $(basename "${patch}")"
-    else
-      die "failed to apply vendored mio patch: ${patch}"
-    fi
-  done
 
   python3 - "${mio_root}" "${checksum_json}" <<'PY2'
 from pathlib import Path
@@ -1066,6 +1093,7 @@ refresh_cached_rusty_v8_archive() {
 
 
 prepare_rust
+prepare_protoc
 build_env_common
 
 v8_install_matches_pin || bash "${TOP}/build-v8.sh"

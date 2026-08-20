@@ -1,0 +1,121 @@
+Keep bounded fallback polling active for every registered interest. Solaris
+event-port delivery is one-shot and an edge can be lost after a descriptor is
+re-associated. Removing a drained direction from fallback therefore restores
+the permanent port_getn wait this fallback is intended to prevent.
+
+The event port remains the low-latency path. The ten millisecond poll is a
+reliability backstop and supplies level-like readiness to Tokio.
+
+diff --git a/src/sys/unix/selector/event_ports.rs b/src/sys/unix/selector/event_ports.rs
+--- a/src/sys/unix/selector/event_ports.rs
++++ b/src/sys/unix/selector/event_ports.rs
+@@ -294,7 +294,7 @@ impl SelectorState {
+                         associate(port, fd, data.interests, generation)?;
+                         data.generation = generation;
+                         data.associated = true;
+-                        data.fallback_interests = None;
++                        data.fallback_interests = Some(data.interests);
+                         continue;
+                     }
+ 
+@@ -304,7 +304,7 @@ impl SelectorState {
+                         associate(port, fd, data.interests, generation)?;
+                         data.generation = generation;
+                         data.associated = true;
+-                        data.fallback_interests = None;
++                        data.fallback_interests = Some(data.interests);
+                         continue;
+                     }
+ 
+@@ -312,7 +312,7 @@ impl SelectorState {
+                     associate(port, fd, data.interests, generation)?;
+                     data.generation = generation;
+                     data.associated = true;
+-                    data.fallback_interests = None;
++                    data.fallback_interests = Some(data.interests);
+                     push_event(
+                         events,
+                         libc::PORT_SOURCE_FD as libc::c_ushort,
+@@ -327,26 +327,19 @@ impl SelectorState {
+                     associate(port, fd, data.interests, generation)?;
+                     data.generation = generation;
+                     data.associated = true;
+-                    data.fallback_interests = None;
++                    data.fallback_interests = Some(data.interests);
+                     continue;
+                 }
+ 
+-                // Event ports disassociate an fd after delivery. Re-associate
+-                // only interests that were not delivered, and use fallback
+-                // polling for delivered interests so sources that clear
+-                // readiness without reregistering can observe future events.
++                // Event ports disassociate an fd after delivery. Re-associate
++                // every interest for low-latency delivery, while retaining
++                // bounded fallback polling for every interest so a later lost
++                // edge cannot strand the descriptor outside both paths.
+                 let generation = data.generation.wrapping_add(1).max(1);
+-                let remaining_interests = data
+-                    .interests
+-                    .remove(interests_from_event(poll_events).unwrap_or(data.interests));
+-                if let Some(remaining_interests) = remaining_interests {
+-                    associate(port, fd, remaining_interests, generation)?;
+-                    data.associated = true;
+-                } else {
+-                    data.associated = false;
+-                }
++                associate(port, fd, data.interests, generation)?;
++                data.associated = true;
+                 data.generation = generation;
+-                data.fallback_interests = interests_from_event(poll_events);
++                data.fallback_interests = Some(data.interests);
+ 
+                 push_event(
+                     events,
+@@ -403,43 +396,20 @@ impl SelectorState {
+             };
+             let fallback_events = interests_to_port(fallback_interests);
+ 
+-            // The readiness edge was already emitted by process_events. Keep
+-            // polling only those delivered bits until each direction drains,
+-            // then restore the drained directions to the event-port
+-            // association. A socket commonly remains writable while its read
+-            // side drains, so waiting for all delivered bits to clear would
+-            // leave the read side permanently disassociated.
++            // Poll every registered direction for the descriptor's lifetime.
++            // This is deliberately level-like: Tokio consumers can miss an
++            // event-port edge during association or reuse, and readiness must
++            // then be re-notified without waiting on port_getn forever.
+             let ready_events = EventMask::from(poll_fd.revents) & fallback_events;
+             if ready_events != 0 {
+-                // Some Tokio consumers do not make progress after a single
+-                // edge, and a later write on a reused socket can also need a
+-                // fresh writable notification. Re-notify readiness at the
+-                // bounded fallback interval; unlike the original zero-timeout
+-                // loop, this cannot flood and starve Tokio workers.
+                 push_event(
+                     events,
+                     libc::PORT_SOURCE_FD as libc::c_ushort,
+                     poll_fd.fd as libc::uintptr_t,
+                     data.token,
+                     ready_events,
+                 );
+             }
+-            let remaining_fallback = interests_from_event(ready_events);
+-            if remaining_fallback != Some(fallback_interests) {
+-                let generation = data.generation.wrapping_add(1).max(1);
+-                let associated_interests = match remaining_fallback {
+-                    Some(fallback) => data.interests.remove(fallback),
+-                    None => Some(data.interests),
+-                };
+-                if let Some(associated_interests) = associated_interests {
+-                    associate(port, poll_fd.fd, associated_interests, generation)?;
+-                    data.associated = true;
+-                } else {
+-                    data.associated = false;
+-                }
+-                data.generation = generation;
+-                data.fallback_interests = remaining_fallback;
+-            }
+         }
+ 
+         Ok(())

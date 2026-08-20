@@ -255,23 +255,29 @@ index aacf254..ee1d0ff 100644
      }
  
      cfg_io_source! {
-@@ -454,8 +473,7 @@ impl SelectorState {
+@@ -454,8 +473,11 @@ impl SelectorState {
                  interests,
                  generation: 1,
                  associated: true,
 -                needs_fallback: true,
 -                fallback_writable: true,
-+                fallback_interests: None,
++                // Poll immediately after registration as a safety net for
++                // readiness that changes while the event-port association is
++                // being installed. Without this, a missed initial event can
++                // leave the descriptor outside fallback polling forever.
++                fallback_interests: Some(interests),
              },
          );
          Ok(record)
-@@ -480,8 +498,7 @@ impl SelectorState {
+@@ -480,8 +502,9 @@ impl SelectorState {
          data.interests = interests;
          data.generation = generation;
          data.associated = true;
 -        data.needs_fallback = true;
 -        data.fallback_writable = true;
-+        data.fallback_interests = None;
++        // As with initial registration, cover readiness changes racing with
++        // the new event-port association.
++        data.fallback_interests = Some(interests);
          Ok(())
      }
  

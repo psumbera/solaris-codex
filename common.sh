@@ -26,6 +26,9 @@ CODEX_SRC_DIR=${CODEX_REPO_DIR}/codex-rs
 CODEX_VENDOR_DIR=${SRC_DIR}/codex-rust-v${SOLARIS_CODEX_VERSION}-vendored-sources
 BINDGEN_PREFIX=${TOOLCHAIN_DIR}/bindgen-cli-${BINDGEN_CLI_VERSION}
 BINDGEN_ROOT_DIR=${TOOLCHAIN_DIR}/rust-bindgen-root
+PROTOBUF_PREFIX=${TOOLCHAIN_DIR}/protobuf-${PROTOBUF_VERSION}
+PROTOBUF_ARCHIVE=protobuf-${PROTOBUF_VERSION}.tar.gz
+PROTOBUF_ARCHIVE_URL=https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/${PROTOBUF_ARCHIVE}
 
 GN_INSTALL_DIR=${INSTALL_DIR}/gn
 V8_INSTALL_DIR=${INSTALL_DIR}/v8
@@ -212,6 +215,50 @@ prepare_rust() {
   )
 }
 
+prepare_protoc() {
+  ensure_dirs
+  need_cmd /usr/bin/curl
+  need_cmd gtar
+  need_cmd cmake
+  need_cmd gcc
+  need_cmd g++
+
+  if [[ -x "${PROTOBUF_PREFIX}/bin/protoc" ]]; then
+    return 0
+  fi
+
+  maybe_enable_proxy
+
+  local archive_path=${DOWNLOAD_DIR}/${PROTOBUF_ARCHIVE}
+  local source_dir=${SRC_DIR}/protobuf-${PROTOBUF_VERSION}
+  local build_dir=${BUILD_DIR}/protobuf-build-${PROTOBUF_VERSION}
+
+  if [[ ! -f "${archive_path}" ]]; then
+    log "Downloading protobuf ${PROTOBUF_VERSION} for native protoc"
+    /usr/bin/curl -L -f -o "${archive_path}" "${PROTOBUF_ARCHIVE_URL}"
+  fi
+
+  rm -rf "${source_dir}" "${build_dir}"
+  gtar xf "${archive_path}" -C "${SRC_DIR}"
+
+  log "Building native protoc ${PROTOBUF_VERSION}"
+  cmake -S "${source_dir}" -B "${build_dir}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER="$(command -v gcc)" \
+    -DCMAKE_CXX_COMPILER="$(command -v g++)" \
+    -DCMAKE_INSTALL_PREFIX="${PROTOBUF_PREFIX}" \
+    -Dprotobuf_BUILD_TESTS=OFF \
+    -Dprotobuf_BUILD_EXAMPLES=OFF \
+    -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+    -Dprotobuf_WITH_ZLIB=OFF
+  cmake --build "${build_dir}" --target protoc -j "${SOLARIS_CODEX_JOBS:-4}"
+  mkdir -p "${PROTOBUF_PREFIX}/bin"
+  cp -p "${build_dir}/protoc" "${PROTOBUF_PREFIX}/bin/protoc"
+
+  [[ -x "${PROTOBUF_PREFIX}/bin/protoc" ]] || \
+    die "native protoc build did not produce ${PROTOBUF_PREFIX}/bin/protoc"
+}
+
 ensure_gn_source() {
   fetch_git_source "${GN_GIT_URL}" "${GN_GIT_REF}" "${GN_SRC_DIR}"
 }
@@ -337,6 +384,7 @@ build_env_common() {
   export NINJA=/usr/bin/ninja
   export LIBCLANG_PATH="$(detect_libclang_path)"
   export CARGO_NET_GIT_FETCH_WITH_CLI=true
+  export PROTOC="${PROTOBUF_PREFIX}/bin/protoc"
 }
 
 verify_file() {
