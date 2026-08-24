@@ -1,22 +1,30 @@
-This patch is needed because Solaris home directories are often NFS-backed, and
+This patch is needed because Solaris home directories can be NFS-backed, and
 SQLite WAL mode can fail during startup when it tries to mmap the `-shm` sidecar.
 
 What it does:
-- uses rollback journal mode instead of WAL for Codex state databases on Solaris
+- keeps WAL mode for Codex state databases on local Solaris filesystems
+- detects NFS-backed SQLite homes with statvfs(2) and uses rollback journaling
 - removes stale Solaris WAL sidecars when the WAL file is empty or absent
-- uses an exclusive one-shot connection to convert existing WAL-marked databases
-  before opening the normal connection pool
+- converts existing WAL-marked NFS databases with a normal one-shot connection
 - keeps WAL mode unchanged on other targets
 
 Why it is needed:
 - without it, Codex can fail at startup on Solaris NFS homes with
   `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
 
-diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index 6c18670..62cf953 100644
+--- a/codex-rs/state/Cargo.toml
++++ b/codex-rs/state/Cargo.toml
+@@ -11,6 +11,7 @@
+ codex-protocol = { workspace = true }
+ codex-utils-absolute-path = { workspace = true }
+ libsqlite3-sys = { workspace = true }
++libc = { workspace = true }
+ log = { workspace = true }
+ serde = { workspace = true, features = ["derive"] }
+ serde_json = { workspace = true }
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -13,6 +13,8 @@ use crate::telemetry::DbKind;
+@@ -13,6 +13,8 @@
  use codex_utils_absolute_path::AbsolutePathBuf;
  use log::LevelFilter;
  use sqlx::ConnectOptions;
@@ -25,29 +33,59 @@ index 6c18670..62cf953 100644
  use sqlx::Error;
  use sqlx::SqlitePool;
  use sqlx::migrate::Migrator;
-@@ -19,8 +21,12 @@ use sqlx::migrate::Migrator;
- use sqlx::sqlite::SqliteAutoVacuum;
- use sqlx::sqlite::SqliteConnectOptions;
+@@ -21,6 +23,14 @@
  use sqlx::sqlite::SqliteJournalMode;
-+#[cfg(target_os = "solaris")]
-+use sqlx::sqlite::SqliteLockingMode;
  use sqlx::sqlite::SqlitePoolOptions;
  use sqlx::sqlite::SqliteSynchronous;
 +#[cfg(target_os = "solaris")]
++use std::ffi::CString;
++#[cfg(target_os = "solaris")]
 +use std::ffi::OsString;
++#[cfg(target_os = "solaris")]
++use std::mem::MaybeUninit;
++#[cfg(target_os = "solaris")]
++use std::os::unix::ffi::OsStrExt;
  use std::path::Path;
  use std::path::PathBuf;
  use std::time::Duration;
-@@ -33,6 +39,82 @@ const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
+@@ -33,6 +43,109 @@
  const STATE_DB_FILENAME: &str = "state_5.sqlite";
  const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
  
-+fn default_sqlite_journal_mode() -> SqliteJournalMode {
-+    if cfg!(target_os = "solaris") {
-+        SqliteJournalMode::Delete
-+    } else {
-+        SqliteJournalMode::Wal
++fn sqlite_journal_mode(path: &Path) -> Result<SqliteJournalMode, Error> {
++    #[cfg(target_os = "solaris")]
++    if solaris_path_is_nfs(path)? {
++        return Ok(SqliteJournalMode::Delete);
 +    }
++
++    #[cfg(not(target_os = "solaris"))]
++    let _ = path;
++    Ok(SqliteJournalMode::Wal)
++}
++
++#[cfg(target_os = "solaris")]
++fn solaris_path_is_nfs(path: &Path) -> Result<bool, Error> {
++    let filesystem_path = path.parent().unwrap_or(path);
++    let filesystem_path = CString::new(filesystem_path.as_os_str().as_bytes()).map_err(|_| {
++        Error::Io(std::io::Error::new(
++            std::io::ErrorKind::InvalidInput,
++            "SQLite path contains NUL",
++        ))
++    })?;
++    let mut stats = MaybeUninit::<libc::statvfs>::uninit();
++    if unsafe { libc::statvfs(filesystem_path.as_ptr(), stats.as_mut_ptr()) } != 0 {
++        return Err(Error::Io(std::io::Error::last_os_error()));
++    }
++    let stats = unsafe { stats.assume_init() };
++    let end = stats
++        .f_basetype
++        .iter()
++        .position(|&byte| byte == 0)
++        .unwrap_or(stats.f_basetype.len());
++    Ok(stats.f_basetype[..end]
++        .iter()
++        .map(|&byte| byte as u8)
++        .eq(b"nfs".iter().copied()))
 +}
 +
 +#[cfg(target_os = "solaris")]
@@ -106,7 +144,6 @@ index 6c18670..62cf953 100644
 +    let options = SqliteConnectOptions::new()
 +        .filename(path)
 +        .create_if_missing(true)
-+        .locking_mode(SqliteLockingMode::Exclusive)
 +        .journal_mode(SqliteJournalMode::Delete)
 +        .synchronous(SqliteSynchronous::Normal)
 +        .busy_timeout(Duration::from_secs(5))
@@ -121,17 +158,21 @@ index 6c18670..62cf953 100644
  #[derive(Clone, Copy)]
  struct RuntimeDbSpec {
      label: &'static str,
-@@ -277,9 +359,12 @@ impl SqliteConfig {
+@@ -276,10 +389,16 @@
+
      /// Open a writable Codex SQLite database, creating it if necessary.
      pub async fn open_read_write_pool(&self, path: &Path) -> Result<SqlitePool, Error> {
++        let journal_mode = sqlite_journal_mode(path)?;
 +        #[cfg(target_os = "solaris")]
-+        prepare_solaris_sqlite_for_rollback_journal(path).await?;
++        if journal_mode == SqliteJournalMode::Delete {
++            prepare_solaris_sqlite_for_rollback_journal(path).await?;
++        }
 +
          let options = SqliteConnectOptions::new()
              .filename(path)
              .create_if_missing(true)
 -            .journal_mode(SqliteJournalMode::Wal)
-+            .journal_mode(default_sqlite_journal_mode())
++            .journal_mode(journal_mode)
              .synchronous(SqliteSynchronous::Normal)
              .auto_vacuum(SqliteAutoVacuum::Incremental)
              .busy_timeout(Duration::from_secs(5))

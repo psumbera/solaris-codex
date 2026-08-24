@@ -89,8 +89,8 @@ patch series under `patches/codex/` before vendoring:
 - `0004-config-host-name-use-solaris-ai-canonname-fallback.patch` supplies the
   Solaris `AI_CANONNAME` value that the Rust `libc` crate does not expose.
 - `0005-state-use-rollback-journal-on-solaris.patch` keeps Codex state
-  databases off SQLite WAL mode on Solaris, avoiding `-shm` mmap failures on
-  NFS-backed homes.
+  databases in SQLite WAL mode on local Solaris filesystems, while using
+  rollback journals on NFS-backed homes to avoid `-shm` mmap failures.
 - `0006-arg0-tolerate-solaris-stale-temp-cleanup.patch` keeps stale arg0 temp
   cleanup best-effort when Solaris/NFS reports non-empty directory races during
   startup.

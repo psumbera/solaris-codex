@@ -985,7 +985,7 @@ impl EventSource for CrosstermEventSource {
     }
 }
 """
-if new not in text:
+if "solaris input receiver dropped" not in text:
     if old not in text:
         raise SystemExit("failed to patch event_stream.rs crossterm source")
     text = text.replace(old, new, 1)
@@ -1008,7 +1008,7 @@ new = """                    Poll::Ready(Some(Err(err))) => {
                         continue;
                     }
 """
-if new not in text:
+if "resetting tui event source after read error" not in text:
     if old not in text:
         raise SystemExit("failed to patch event_stream.rs error handling")
     text = text.replace(old, new, 1)
@@ -1027,7 +1027,7 @@ new = """            Event::Key(key_event) => {
                 #[cfg(unix)]
                 if crate::tui::job_control::SUSPEND_KEY.is_press(key_event) {
 """
-if new not in text:
+if "let key_event = crossterm::event::KeyEvent" not in text:
     if old not in text:
         raise SystemExit("failed to patch event_stream.rs solaris key kind")
     text = text.replace(old, new, 1)
