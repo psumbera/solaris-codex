@@ -301,6 +301,30 @@ apply_patch_series() {
   done
 }
 
+patch_series_sha256() {
+  local patch_dir=$1
+
+  python3 - "${patch_dir}" <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+for path in sorted(Path(sys.argv[1]).glob("*.patch")):
+    digest.update(path.name.encode())
+    digest.update(b"\0")
+    digest.update(path.read_bytes())
+print(digest.hexdigest())
+PY
+}
+
+v8_source_identity() {
+  printf '%s\n%s\n%s\n' \
+    "${V8_GIT_URL}" \
+    "${V8_GIT_REF}" \
+    "$(patch_series_sha256 "${TOP}/patches/v8")"
+}
+
 write_vendored_config() {
   local src_dir=$1
   local vendor_dir=$2

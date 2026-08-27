@@ -480,6 +480,6 @@ mkdir -p "${V8_INSTALL_DIR}/lib" "${V8_INSTALL_DIR}/share" "${TOP}/support"
 cp "${V8_SRC_DIR}/target/release/gn_out/obj/librusty_v8.a" "${V8_INSTALL_DIR}/lib/"
 cp "${generated_src_binding}" "${V8_INSTALL_DIR}/share/src_binding.rs"
 cp "${generated_src_binding}" "${TOP}/support/src_binding_prebuilt.rs"
-printf '%s\n%s\n' "${V8_GIT_URL}" "${V8_GIT_REF}" > "${V8_INSTALL_DIR}/.source-ref"
+v8_source_identity > "${V8_INSTALL_DIR}/.source-ref"
 
 log "Installed v8 artifacts to ${V8_INSTALL_DIR}"

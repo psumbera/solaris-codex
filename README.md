@@ -51,7 +51,7 @@ Installed artifacts end up in:
 - `build/install/codex/bin/codex`
 - `build/install/codex/bin/codex-code-mode-host`
 
-Codex 0.149 enables the separate code-mode host by default. Keep
+Codex 0.150 enables the separate code-mode host by default. Keep
 `codex-code-mode-host` beside `codex` when copying or packaging this build.
 
 Quick verification:
@@ -69,7 +69,7 @@ build/install/codex/bin/codex-code-mode-host --help
 - The wrapper uses the official Solaris Rust standalone installer target
   `x86_64-pc-solaris`.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.149.1`, built from its `codex-rs/` workspace.
+  `rust-v0.150.1`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because

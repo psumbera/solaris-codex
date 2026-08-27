@@ -1038,14 +1038,15 @@ PY
 
 v8_install_matches_pin() {
   local stamp=${V8_INSTALL_DIR}/.source-ref
-  local current=
+  local current expected
 
   [[ -f "${V8_INSTALL_DIR}/lib/librusty_v8.a" ]] || return 1
   [[ -f "${V8_INSTALL_DIR}/share/src_binding.rs" ]] || return 1
   [[ -f "${stamp}" ]] || return 1
 
-  current=$(tr '\n' ' ' < "${stamp}" | sed 's/ $//')
-  [[ "${current}" == "${V8_GIT_URL} ${V8_GIT_REF}" ]]
+  current=$(<"${stamp}")
+  expected=$(v8_source_identity)
+  [[ "${current}" == "${expected}" ]]
 }
 
 refresh_cached_rusty_v8_archive() {
@@ -1055,14 +1056,14 @@ refresh_cached_rusty_v8_archive() {
   local target_dir=${CODEX_SRC_DIR}/target/release
   local v8_rlib=
   local current=
-  local desired="${V8_GIT_URL} ${V8_GIT_REF}"
+  local desired
   local refresh=0
+
+  desired=$(v8_source_identity)
 
   [[ -f "${cached_archive}" ]] || return 0
 
-  if [[ -f "${cached_stamp}" ]]; then
-    current=$(tr '\n' ' ' < "${cached_stamp}" | sed 's/ $//')
-  fi
+  [[ ! -f "${cached_stamp}" ]] || current=$(<"${cached_stamp}")
 
   if ! cmp -s "${V8_INSTALL_DIR}/lib/librusty_v8.a" "${cached_archive}" ||
      [[ "${current}" != "${desired}" ]]; then
@@ -1086,7 +1087,7 @@ refresh_cached_rusty_v8_archive() {
     rm -rf "${target_dir}/.fingerprint/v8-"*
     mkdir -p "${cached_dir}"
     cp "${V8_INSTALL_DIR}/lib/librusty_v8.a" "${cached_archive}"
-    printf '%s\n%s\n' "${V8_GIT_URL}" "${V8_GIT_REF}" > "${cached_stamp}"
+    v8_source_identity > "${cached_stamp}"
   fi
 }
 

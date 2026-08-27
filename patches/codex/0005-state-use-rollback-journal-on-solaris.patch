@@ -1,20 +1,29 @@
 This patch is needed because Solaris home directories can be NFS-backed, and
-SQLite WAL mode can fail during startup when it tries to mmap the `-shm` sidecar.
+SQLite WAL mode can fail during startup when it tries to mmap the `-shm`
+sidecar.
 
 What it does:
 - keeps WAL mode for Codex state databases on local Solaris filesystems
 - detects NFS-backed SQLite homes with statvfs(2) and uses rollback journaling
-- removes stale Solaris WAL sidecars when the WAL file is empty or absent
-- converts existing WAL-marked NFS databases with a normal one-shot connection
+- serializes one-shot journal migrations with an NFS-safe fcntl(2) lock
+- exclusively locks a WAL-marked database before taking a conversion snapshot
+- copies the database and WAL, but not SHM, to local /tmp for checkpointing
+- atomically replaces the NFS database after verifying rollback-journal mode
+- preserves permissions and removes obsolete WAL sidecars after conversion
+- adds a Solaris regression test with committed data present only in the WAL
 - keeps WAL mode unchanged on other targets
 
 Why it is needed:
-- without it, Codex can fail at startup on Solaris NFS homes with
-  `SQLITE_IOERR_SHMMAP` / SQLite extended error code 5386
+- opening an existing WAL database in place can map `-shm` before a
+  `PRAGMA journal_mode=DELETE` request is processed
+- that ordering fails on Solaris NFS with `SQLITE_IOERR_SHMMAP` / extended
+  error code 5386, so conversion must complete on a local filesystem first
 
+diff --git a/codex-rs/state/Cargo.toml b/codex-rs/state/Cargo.toml
+index 0d781fb..30f8083 100644
 --- a/codex-rs/state/Cargo.toml
 +++ b/codex-rs/state/Cargo.toml
-@@ -11,6 +11,7 @@
+@@ -11,11 +11,13 @@ codex-history = { workspace = true }
  codex-protocol = { workspace = true }
  codex-utils-absolute-path = { workspace = true }
  libsqlite3-sys = { workspace = true }
@@ -22,9 +31,17 @@ Why it is needed:
  log = { workspace = true }
  serde = { workspace = true, features = ["derive"] }
  serde_json = { workspace = true }
+ sqlx = { workspace = true }
+ strum = { workspace = true, features = ["derive"] }
++tempfile = { workspace = true }
+ tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+ tracing = { workspace = true }
+ tracing-subscriber = { workspace = true }
+diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
+index 4bb65c6..005798f 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -13,6 +13,8 @@
+@@ -13,6 +13,8 @@ use crate::telemetry::DbKind;
  use codex_utils_absolute_path::AbsolutePathBuf;
  use log::LevelFilter;
  use sqlx::ConnectOptions;
@@ -33,7 +50,7 @@ Why it is needed:
  use sqlx::Error;
  use sqlx::SqlitePool;
  use sqlx::migrate::Migrator;
-@@ -21,6 +23,14 @@
+@@ -21,6 +23,28 @@ use sqlx::sqlite::SqliteConnectOptions;
  use sqlx::sqlite::SqliteJournalMode;
  use sqlx::sqlite::SqlitePoolOptions;
  use sqlx::sqlite::SqliteSynchronous;
@@ -42,13 +59,27 @@ Why it is needed:
 +#[cfg(target_os = "solaris")]
 +use std::ffi::OsString;
 +#[cfg(target_os = "solaris")]
++use std::fs::File;
++#[cfg(target_os = "solaris")]
++use std::fs::OpenOptions;
++#[cfg(target_os = "solaris")]
++use std::io::Read;
++#[cfg(target_os = "solaris")]
++use std::io::Seek;
++#[cfg(target_os = "solaris")]
++use std::io::SeekFrom;
++#[cfg(target_os = "solaris")]
 +use std::mem::MaybeUninit;
 +#[cfg(target_os = "solaris")]
++use std::os::fd::AsRawFd;
++#[cfg(target_os = "solaris")]
 +use std::os::unix::ffi::OsStrExt;
++#[cfg(target_os = "solaris")]
++use std::os::unix::fs::OpenOptionsExt;
  use std::path::Path;
  use std::path::PathBuf;
  use std::time::Duration;
-@@ -33,6 +43,109 @@
+@@ -33,6 +57,253 @@ const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
  const STATE_DB_FILENAME: &str = "state_5.sqlite";
  const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
  
@@ -94,7 +125,6 @@ Why it is needed:
 +    // Codex homes on Solaris NFS mounts. Older runs may have left an empty WAL
 +    // plus stale SHM file before the Solaris rollback-journal switch.
 +    let wal_path = sqlite_sidecar_path(path, "-wal");
-+    let shm_path = sqlite_sidecar_path(path, "-shm");
 +
 +    let should_remove = match std::fs::metadata(&wal_path) {
 +        Ok(metadata) => metadata.len() == 0,
@@ -112,7 +142,15 @@ Why it is needed:
 +        return;
 +    }
 +
-+    for sidecar in [wal_path, shm_path] {
++    remove_solaris_wal_sidecars(path);
++}
++
++#[cfg(target_os = "solaris")]
++fn remove_solaris_wal_sidecars(path: &Path) {
++    for sidecar in [
++        sqlite_sidecar_path(path, "-wal"),
++        sqlite_sidecar_path(path, "-shm"),
++    ] {
 +        match std::fs::remove_file(&sidecar) {
 +            Ok(()) => {}
 +            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
@@ -139,10 +177,81 @@ Why it is needed:
 +        Err(err) => return Err(Error::Io(err)),
 +    }
 +
-+    cleanup_solaris_wal_sidecars(path);
++    let parent = path.parent().ok_or_else(|| {
++        Error::Io(std::io::Error::new(
++            std::io::ErrorKind::InvalidInput,
++            "SQLite path has no parent directory",
++        ))
++    })?;
++    let lock_path = parent.join(".codex-sqlite-journal-migration.lock");
++    let lock_file = OpenOptions::new()
++        .create(true)
++        .read(true)
++        .write(true)
++        .mode(0o600)
++        .open(lock_path)
++        .map_err(Error::Io)?;
++    lock_solaris_file(&lock_file, true).map_err(Error::Io)?;
++
++    if !sqlite_path_uses_wal(path)? {
++        cleanup_solaris_wal_sidecars(path);
++        return Ok(());
++    }
++
++    let mut source_db = OpenOptions::new()
++        .read(true)
++        .write(true)
++        .open(path)
++        .map_err(Error::Io)?;
++    lock_solaris_file(&source_db, false).map_err(|err| {
++        Error::Io(std::io::Error::new(
++            err.kind(),
++            format!(
++                "cannot convert WAL database {} while it is in use: {err}",
++                path.display()
++            ),
++        ))
++    })?;
++    if !sqlite_file_uses_wal(&mut source_db)? {
++        cleanup_solaris_wal_sidecars(path);
++        return Ok(());
++    }
++
++    let local_dir = tempfile::Builder::new()
++        .prefix("codex-sqlite-rollback-")
++        .tempdir_in("/tmp")
++        .map_err(Error::Io)?;
++    let filename = path.file_name().ok_or_else(|| {
++        Error::Io(std::io::Error::new(
++            std::io::ErrorKind::InvalidInput,
++            "SQLite path has no file name",
++        ))
++    })?;
++    let local_db_path = local_dir.path().join(filename);
++    if solaris_path_is_nfs(&local_db_path)? {
++        return Err(Error::Io(std::io::Error::other(
++            "cannot convert SQLite WAL database because /tmp is NFS-backed",
++        )));
++    }
++    let mut local_db = File::create(&local_db_path).map_err(Error::Io)?;
++    source_db.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
++    std::io::copy(&mut source_db, &mut local_db).map_err(Error::Io)?;
++    local_db.sync_all().map_err(Error::Io)?;
++
++    let wal_path = sqlite_sidecar_path(path, "-wal");
++    match File::open(&wal_path) {
++        Ok(mut source_wal) => {
++            let local_wal_path = sqlite_sidecar_path(&local_db_path, "-wal");
++            let mut local_wal = File::create(local_wal_path).map_err(Error::Io)?;
++            std::io::copy(&mut source_wal, &mut local_wal).map_err(Error::Io)?;
++            local_wal.sync_all().map_err(Error::Io)?;
++        }
++        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
++        Err(err) => return Err(Error::Io(err)),
++    }
 +
 +    let options = SqliteConnectOptions::new()
-+        .filename(path)
++        .filename(&local_db_path)
 +        .create_if_missing(true)
 +        .journal_mode(SqliteJournalMode::Delete)
 +        .synchronous(SqliteSynchronous::Normal)
@@ -151,14 +260,80 @@ Why it is needed:
 +    let conn = options.connect().await?;
 +    conn.close().await?;
 +
-+    cleanup_solaris_wal_sidecars(path);
++    if sqlite_path_uses_wal(&local_db_path)? {
++        return Err(Error::Io(std::io::Error::other(
++            "local SQLite WAL conversion did not select rollback journaling",
++        )));
++    }
++
++    let source_permissions = source_db.metadata().map_err(Error::Io)?.permissions();
++    let mut converted_db = File::open(&local_db_path).map_err(Error::Io)?;
++    let mut replacement = tempfile::Builder::new()
++        .prefix(".codex-sqlite-rollback-")
++        .tempfile_in(parent)
++        .map_err(Error::Io)?;
++    std::io::copy(&mut converted_db, replacement.as_file_mut()).map_err(Error::Io)?;
++    replacement
++        .as_file()
++        .set_permissions(source_permissions)
++        .map_err(Error::Io)?;
++    replacement.as_file().sync_all().map_err(Error::Io)?;
++    let replacement_file = replacement
++        .persist(path)
++        .map_err(|err| Error::Io(err.error))?;
++    replacement_file.sync_all().map_err(Error::Io)?;
++
++    remove_solaris_wal_sidecars(path);
 +    Ok(())
++}
++
++#[cfg(target_os = "solaris")]
++fn sqlite_path_uses_wal(path: &Path) -> Result<bool, Error> {
++    let mut file = File::open(path).map_err(Error::Io)?;
++    sqlite_file_uses_wal(&mut file)
++}
++
++#[cfg(target_os = "solaris")]
++fn sqlite_file_uses_wal(file: &mut File) -> Result<bool, Error> {
++    const SQLITE_HEADER_LEN: usize = 20;
++    const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
++
++    let mut header = [0_u8; SQLITE_HEADER_LEN];
++    file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
++    match file.read_exact(&mut header) {
++        Ok(()) => {}
++        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
++        Err(err) => return Err(Error::Io(err)),
++    }
++    Ok(&header[..SQLITE_MAGIC.len()] == SQLITE_MAGIC
++        && (header[18] == 2 || header[19] == 2))
++}
++
++#[cfg(target_os = "solaris")]
++fn lock_solaris_file(file: &File, wait: bool) -> std::io::Result<()> {
++    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
++    lock.l_type = libc::F_WRLCK as libc::c_short;
++    lock.l_whence = libc::SEEK_SET as libc::c_short;
++    lock.l_start = 0;
++    lock.l_len = 0;
++    let command = if wait { libc::F_SETLKW } else { libc::F_SETLK };
++
++    loop {
++        if unsafe { libc::fcntl(file.as_raw_fd(), command, &lock) } == 0 {
++            return Ok(());
++        }
++        let err = std::io::Error::last_os_error();
++        if err.raw_os_error() == Some(libc::EINTR) {
++            continue;
++        }
++        return Err(err);
++    }
 +}
 +
  #[derive(Clone, Copy)]
  struct RuntimeDbSpec {
      label: &'static str,
-@@ -276,10 +389,16 @@
+@@ -276,10 +547,16 @@ impl SqliteConfig {
 
      /// Open a writable Codex SQLite database, creating it if necessary.
      pub async fn open_read_write_pool(&self, path: &Path) -> Result<SqlitePool, Error> {
@@ -176,3 +351,74 @@ Why it is needed:
              .synchronous(SqliteSynchronous::Normal)
              .auto_vacuum(SqliteAutoVacuum::Incremental)
              .busy_timeout(Duration::from_secs(5))
+@@ -303,3 +580,70 @@ impl SqliteConfig {
+             .await
+     }
+ }
++
++#[cfg(all(test, target_os = "solaris"))]
++mod tests {
++    use super::prepare_solaris_sqlite_for_rollback_journal;
++    use super::sqlite_path_uses_wal;
++    use super::sqlite_sidecar_path;
++    use sqlx::ConnectOptions;
++    use sqlx::Connection;
++    use sqlx::sqlite::SqliteConnectOptions;
++    use sqlx::sqlite::SqliteJournalMode;
++
++    #[tokio::test]
++    async fn converts_wal_snapshot_without_mapping_nfs_shm() -> anyhow::Result<()> {
++        let test_dir = tempfile::Builder::new()
++            .prefix("codex-sqlite-conversion-test-")
++            .tempdir_in("/tmp")?;
++        let source_path = test_dir.path().join("source.sqlite");
++        let fixture_path = test_dir.path().join("fixture.sqlite");
++
++        let mut source = SqliteConnectOptions::new()
++            .filename(&source_path)
++            .create_if_missing(true)
++            .journal_mode(SqliteJournalMode::Wal)
++            .connect()
++            .await?;
++        sqlx::query("PRAGMA wal_autocheckpoint=0")
++            .execute(&mut source)
++            .await?;
++        sqlx::query("CREATE TABLE test_data (value INTEGER NOT NULL)")
++            .execute(&mut source)
++            .await?;
++        sqlx::query("INSERT INTO test_data (value) VALUES (42)")
++            .execute(&mut source)
++            .await?;
++
++        let source_wal = sqlite_sidecar_path(&source_path, "-wal");
++        assert!(std::fs::metadata(&source_wal)?.len() > 0);
++        std::fs::copy(&source_path, &fixture_path)?;
++        std::fs::copy(
++            &source_wal,
++            sqlite_sidecar_path(&fixture_path, "-wal"),
++        )?;
++        source.close().await?;
++
++        assert!(sqlite_path_uses_wal(&fixture_path)?);
++        prepare_solaris_sqlite_for_rollback_journal(&fixture_path).await?;
++        assert!(!sqlite_path_uses_wal(&fixture_path)?);
++        assert!(!sqlite_sidecar_path(&fixture_path, "-wal").exists());
++        assert!(!sqlite_sidecar_path(&fixture_path, "-shm").exists());
++
++        let mut converted = SqliteConnectOptions::new()
++            .filename(&fixture_path)
++            .connect()
++            .await?;
++        let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
++            .fetch_one(&mut converted)
++            .await?;
++        let value: i64 = sqlx::query_scalar("SELECT value FROM test_data")
++            .fetch_one(&mut converted)
++            .await?;
++        converted.close().await?;
++
++        assert_eq!(journal_mode, "delete");
++        assert_eq!(value, 42);
++        Ok(())
++    }
++}

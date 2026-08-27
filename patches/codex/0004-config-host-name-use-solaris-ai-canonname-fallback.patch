@@ -1,23 +1,23 @@
-This patch is needed because upstream host name canonicalization now requests
-`AI_CANONNAME`, but the Solaris target in the Rust `libc` crate does not expose
-that constant even though Solaris libc supports the flag.
+This patch is needed because upstream host name canonicalization requests
+`AI_CANONNAME`, but the Solaris target in the Rust `libc` crate does not
+expose that constant even though Solaris libc supports the flag.
 
 What it does:
 - introduces a Solaris-local `AI_CANONNAME` fallback value
 - keeps the existing libc constant on other Unix targets
-- preserves the FQDN lookup behavior added upstream
+- preserves upstream FQDN lookup and hostname caching behavior
 
 Why it is needed:
 - without it, the Solaris Codex build fails in `codex-config` with
   `cannot find value AI_CANONNAME in crate libc`
 
 diff --git a/codex-rs/config/src/host_name.rs b/codex-rs/config/src/host_name.rs
-index eb67b7b..1e93289 100644
+index 7f92bfc..c49dff2 100644
 --- a/codex-rs/config/src/host_name.rs
 +++ b/codex-rs/config/src/host_name.rs
-@@ -10,6 +10,11 @@ use winapi_util::sysinfo::get_computer_name;
- 
- static HOST_NAME: LazyLock<Option<String>> = LazyLock::new(compute_host_name);
+@@ -14,6 +14,11 @@ static OS_HOST_NAME: LazyLock<Option<String>> = LazyLock::new(|| {
+     normalize_host_name(&kernel_hostname.to_string_lossy())
+ });
  
 +#[cfg(target_os = "solaris")]
 +const AI_CANONNAME_FLAG: i32 = 0x0010;
@@ -27,7 +27,7 @@ index eb67b7b..1e93289 100644
  /// Returns a process-cached canonical hostname, falling back to the normalized
  /// kernel hostname. The first call on Unix may perform blocking DNS resolution.
  pub fn host_name() -> Option<String> {
-@@ -41,7 +46,7 @@ fn normalize_host_name(hostname: &str) -> Option<String> {
+@@ -49,7 +54,7 @@ fn normalize_host_name(hostname: &str) -> Option<String> {
  #[cfg(unix)]
  fn local_fqdn_for_hostname(hostname: &str) -> Option<String> {
      let hints = AddrInfoHints {
