@@ -12,16 +12,17 @@ larger than a typical pipe buffer.
 diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
 --- a/codex-rs/exec-server/src/fs_sandbox.rs
 +++ b/codex-rs/exec-server/src/fs_sandbox.rs
-@@ -19,5 +19,6 @@ use codex_utils_absolute_path::AbsolutePathBuf;
- use codex_utils_absolute_path::canonicalize_preserving_symlinks;
+@@ -22,7 +22,6 @@
  use codex_utils_path_uri::PathUri;
-+use tokio::io::AsyncReadExt;
+ #[cfg(any(windows, test))]
+ use tokio::io::AsyncBufReadExt;
+-#[cfg(any(windows, test))]
+ use tokio::io::AsyncReadExt;
  use tokio::io::AsyncWriteExt;
  use tokio::process::Command;
+@@ -428,9 +427,35 @@
  
-@@ -322,9 +323,35 @@ async fn run_command(
- }
- 
+ #[cfg(not(windows))]
  pub(crate) async fn wait_for_helper_output(
 -    child: tokio::process::Child,
 +    mut child: tokio::process::Child,
@@ -57,7 +58,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
      if !output.status.success() {
          return Err(internal_error(format!(
              "fs sandbox helper failed with status {status}: {stderr}",
-@@ -381,6 +408,10 @@ pub(crate) fn io_error(err: std::io::Error) -> JSONRPCErrorError {
+@@ -488,6 +513,10 @@
      internal_error(err.to_string())
  }
  
@@ -68,7 +69,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
      internal_error(format!(
          "failed to encode or decode fs sandbox helper message: {err}"
-@@ -727,6 +758,58 @@ mod tests {
+@@ -838,6 +867,58 @@
          assert!(!policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
  
