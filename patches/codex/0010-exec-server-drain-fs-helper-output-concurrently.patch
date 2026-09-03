@@ -69,7 +69,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
      internal_error(format!(
          "failed to encode or decode fs sandbox helper message: {err}"
-@@ -838,6 +867,58 @@
+@@ -838,6 +867,59 @@
          assert!(!policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
  
@@ -91,21 +91,22 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +        let network_policy = NetworkSandboxPolicy::Enabled;
 +        let permission_profile =
 +            PermissionProfile::from_runtime_permissions(&file_system_policy, network_policy);
++        let cwd = PathUri::from_abs_path(&AbsolutePathBuf::current_dir().expect("cwd"));
 +        let command = codex_sandboxing::SandboxExecRequest {
 +            command: vec![
 +                "/usr/bin/printf".to_string(),
 +                "%s\n".to_string(),
 +                response_json,
 +            ],
-+            cwd: AbsolutePathBuf::current_dir().expect("cwd"),
++            cwd: cwd.clone(),
++            sandbox_policy_cwd: cwd,
 +            env: HashMap::new(),
 +            network: None,
++            network_environment_id: None,
 +            sandbox: codex_sandboxing::SandboxType::None,
 +            windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel::Disabled,
 +            windows_sandbox_private_desktop: false,
 +            permission_profile,
-+            file_system_sandbox_policy: file_system_policy,
-+            network_sandbox_policy: network_policy,
 +            arg0: None,
 +        };
 +
