@@ -20,9 +20,9 @@ diff --git a/codex-rs/sandboxing/src/lib.rs b/codex-rs/sandboxing/src/lib.rs
 +#[cfg(target_os = "solaris")]
 +mod solaris;
  mod spawn;
+ mod terminal_queries;
  mod violation;
- mod windows;
-@@ -84,6 +86,14 @@
+@@ -87,6 +89,14 @@
              SandboxTransformError::WindowsSandboxPreparation(message) => {
                  CodexErr::UnsupportedOperation(message)
              }
@@ -125,9 +125,7 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
          }
      }
  
-@@ -302,13 +331,22 @@
-         has_managed_network_requirements: bool,
-     ) -> SandboxType {
+@@ -307,11 +336,20 @@
          if self.should_sandbox(permission_profile, pref, has_managed_network_requirements) {
 -            get_platform_sandbox(windows_sandbox_level != WindowsSandboxLevel::Disabled)
 -                .unwrap_or(SandboxType::None)
@@ -150,7 +148,7 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
      /// Returns whether the request needs a sandbox, independently of whether
      /// this host can provide a concrete sandbox implementation.
      pub fn should_sandbox(
-@@ -439,6 +477,24 @@
+@@ -442,6 +480,24 @@
                      Some(pending),
                  )
              }
@@ -395,7 +393,7 @@ diff --git a/codex-rs/exec-server/src/process.rs b/codex-rs/exec-server/src/proc
 diff --git a/codex-rs/exec-server/src/local_process.rs b/codex-rs/exec-server/src/local_process.rs
 --- a/codex-rs/exec-server/src/local_process.rs
 +++ b/codex-rs/exec-server/src/local_process.rs
-@@ -364,6 +364,9 @@
+@@ -371,6 +371,9 @@
              SandboxType::None => Some(ProcessSandboxType::None),
              SandboxType::MacosSeatbelt => Some(ProcessSandboxType::MacosSeatbelt),
              SandboxType::LinuxSeccomp => Some(ProcessSandboxType::LinuxSeccomp),
