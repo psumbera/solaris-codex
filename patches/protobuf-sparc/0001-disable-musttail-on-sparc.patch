@@ -1,0 +1,16 @@
+Subject: [PATCH] protobuf: use the portable parser on SPARC
+
+GCC 16 recognizes clang::musttail, but its SPARC backend cannot lower all
+protobuf parser calls as sibling calls. Use the existing portable fallback.
+
+--- a/src/google/protobuf/port_def.inc
++++ b/src/google/protobuf/port_def.inc
+@@ -234,7 +234,7 @@
+ #ifdef PROTOBUF_TAILCALL
+ #error PROTOBUF_TAILCALL was previously defined
+ #endif
+-#if ABSL_HAVE_CPP_ATTRIBUTE(clang::musttail) && !defined(__arm__) &&  \
++#if ABSL_HAVE_CPP_ATTRIBUTE(clang::musttail) && !defined(__sparc__) && !defined(__arm__) && \
+     !defined(_ARCH_PPC) && !defined(__wasm__) &&                      \
+     !(defined(_MSC_VER) && defined(_M_IX86)) && !defined(__i386__)
+ // Compilation fails on ARM32: b/195943306

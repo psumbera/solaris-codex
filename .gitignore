@@ -5,6 +5,7 @@
 /build.exit
 
 # Local scratch / backups
+/.local/
 /build-codex.sh.bak-*
 /repro-mio-tty/
 

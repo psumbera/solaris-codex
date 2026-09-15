@@ -25,16 +25,16 @@ EOF
 
 prepare_rust
 build_env_common
-ensure_gn_source
-ensure_v8_source
-vendor_rust_sources "${V8_SRC_DIR}" "${V8_VENDOR_DIR}"
+if [[ ${SOLARIS_CODEX_WITH_V8} == 1 ]]; then
+  ensure_gn_source
+  ensure_v8_source
+  vendor_rust_sources "${V8_SRC_DIR}" "${V8_VENDOR_DIR}"
+fi
 ensure_codex_source
 vendor_rust_sources "${CODEX_SRC_DIR}" "${CODEX_VENDOR_DIR}"
 
 log "Prepared source trees:"
-printf '  %s\n' \
-  "${GN_SRC_DIR}" \
-  "${V8_SRC_DIR}" \
-  "${V8_VENDOR_DIR}" \
-  "${CODEX_REPO_DIR}" \
-  "${CODEX_VENDOR_DIR}"
+if [[ ${SOLARIS_CODEX_WITH_V8} == 1 ]]; then
+  printf '  %s\n' "${GN_SRC_DIR}" "${V8_SRC_DIR}" "${V8_VENDOR_DIR}"
+fi
+printf '  %s\n' "${CODEX_REPO_DIR}" "${CODEX_VENDOR_DIR}"

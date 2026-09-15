@@ -6,6 +6,17 @@ TOP=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=versions.sh
 source "${TOP}/versions.sh"
 
+SOLARIS_CODEX_WITH_V8=1
+SOLARIS_CODEX_LIBDIR=amd64
+if [[ $(uname -p) == sparc ]]; then
+  RUST_TRIPLE=sparcv9-sun-solaris
+  SOLARIS_CODEX_WITH_V8=0
+  SOLARIS_CODEX_LIBDIR=sparcv9
+  export CFLAGS="${CFLAGS:+${CFLAGS} }-m64"
+  export CXXFLAGS="${CXXFLAGS:+${CXXFLAGS} }-m64"
+  export LDFLAGS="${LDFLAGS:+${LDFLAGS} }-m64"
+fi
+
 BUILD_DIR=${BUILD_DIR:-${TOP}/build}
 DOWNLOAD_DIR=${DOWNLOAD_DIR:-${BUILD_DIR}/downloads}
 TOOLCHAIN_DIR=${TOOLCHAIN_DIR:-${BUILD_DIR}/toolchains}
@@ -92,7 +103,7 @@ detect_libclang_path() {
       continue
     fi
 
-    for candidate in "${vdir}/lib/amd64" "${vdir}/lib"; do
+    for candidate in "${vdir}/lib/${SOLARIS_CODEX_LIBDIR}" "${vdir}/lib"; do
       checked+=("${candidate}")
       [[ -f "${candidate}/libclang.so" ]] || continue
       score=$((major * 1000000 + minor * 1000 + patch))
@@ -122,7 +133,7 @@ check_supported_host() {
   arch=$(uname -p)
 
   [[ "${os}" == "SunOS" ]] || die "only Solaris is supported"
-  [[ "${arch}" == "i386" ]] || die "only Solaris x86/i386 is currently supported"
+  [[ "${arch}" == "i386" || "${arch}" == "sparc" ]] || die "unsupported Solaris architecture: ${arch}"
 }
 
 ensure_dirs() {
@@ -240,6 +251,10 @@ prepare_protoc() {
 
   rm -rf "${source_dir}" "${build_dir}"
   gtar xf "${archive_path}" -C "${SRC_DIR}"
+
+  if [[ ${SOLARIS_CODEX_WITH_V8} == 0 ]]; then
+    apply_patch_series "${source_dir}" "${TOP}/patches/protobuf-sparc"
+  fi
 
   log "Building native protoc ${PROTOBUF_VERSION}"
   cmake -S "${source_dir}" -B "${build_dir}" \

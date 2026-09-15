@@ -1093,11 +1093,14 @@ refresh_cached_rusty_v8_archive() {
 
 
 
+check_supported_host
 prepare_rust
 prepare_protoc
 build_env_common
 
-v8_install_matches_pin || bash "${TOP}/build-v8.sh"
+if [[ ${SOLARIS_CODEX_WITH_V8} == 1 ]]; then
+  v8_install_matches_pin || bash "${TOP}/build-v8.sh"
+fi
 
 ensure_codex_source
 apply_patch_series "${CODEX_REPO_DIR}" "${TOP}/patches/codex"
@@ -1113,9 +1116,11 @@ patch_vendored_fslock
 patch_vendored_onig_sys_alloca
 patch_vendored_mio_event_ports
 
-export GN="${GN_INSTALL_DIR}/bin/gn"
-export RUSTY_V8_ARCHIVE="${V8_INSTALL_DIR}/lib/librusty_v8.a"
-export RUSTY_V8_SRC_BINDING_PATH="${V8_INSTALL_DIR}/share/src_binding.rs"
+if [[ ${SOLARIS_CODEX_WITH_V8} == 1 ]]; then
+  export GN="${GN_INSTALL_DIR}/bin/gn"
+  export RUSTY_V8_ARCHIVE="${V8_INSTALL_DIR}/lib/librusty_v8.a"
+  export RUSTY_V8_SRC_BINDING_PATH="${V8_INSTALL_DIR}/share/src_binding.rs"
+fi
 export CARGO_PROFILE_RELEASE_LTO=false
 export CARGO_PROFILE_RELEASE_DEBUG=none
 export CARGO_PROFILE_RELEASE_STRIP=symbols
@@ -1130,26 +1135,32 @@ export LD_EXEC_OPTIONS=
 export LD_PIE_OPTIONS=
 export LD_SHARED_OPTIONS=
 
-refresh_cached_rusty_v8_archive
+codex_executables=(codex)
+if [[ ${SOLARIS_CODEX_WITH_V8} == 1 ]]; then
+  refresh_cached_rusty_v8_archive
+  codex_executables+=(codex-code-mode-host)
+fi
 
 jobs=${SOLARIS_CODEX_JOBS:-4}
 jobs=$(printf %s "${jobs}" | tr -cd '0-9')
 [[ -n "${jobs}" ]] || jobs=4
 
-log "Building codex and codex-code-mode-host with ${jobs} jobs"
+log "Building ${codex_executables[*]} for ${RUST_TRIPLE} with ${jobs} jobs"
 (
   cd "${CODEX_SRC_DIR}"
   # Avoid carrying Solaris local dynamic symbol names in the installed binary.
   "${CARGO}" rustc --release --offline -j "${jobs}" -p codex-cli --bin codex -- \
     -C link-arg=-z -C link-arg=noldynsym
-  "${CARGO}" rustc --release --offline -j "${jobs}" \
-    -p codex-code-mode-host --bin codex-code-mode-host -- \
-    -C link-arg=-z -C link-arg=noldynsym
+  if [[ ${SOLARIS_CODEX_WITH_V8} == 1 ]]; then
+    "${CARGO}" rustc --release --offline -j "${jobs}" \
+      -p codex-code-mode-host --bin codex-code-mode-host -- \
+      -C link-arg=-z -C link-arg=noldynsym
+  fi
 )
 
 codex_install_dir="${CODEX_INSTALL_DIR}/bin"
 mkdir -p "${codex_install_dir}"
-for codex_executable in codex codex-code-mode-host; do
+for codex_executable in "${codex_executables[@]}"; do
   (
     codex_install_tmp=$(mktemp "${codex_install_dir}/.${codex_executable}.XXXXXX")
     trap 'rm -f "${codex_install_tmp}"' EXIT
@@ -1158,4 +1169,4 @@ for codex_executable in codex codex-code-mode-host; do
   )
 done
 
-log "Installed codex and codex-code-mode-host to ${codex_install_dir}"
+log "Installed ${codex_executables[*]} to ${codex_install_dir}"

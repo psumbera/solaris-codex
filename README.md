@@ -1,6 +1,6 @@
 # OpenAI Codex CLI for Oracle Solaris 11.4
 
-Build and run the OpenAI Codex CLI on Oracle Solaris 11.4 x86. This
+Build and run the OpenAI Codex CLI on Oracle Solaris 11.4 x64 and SPARC. This
 standalone Solaris Codex build wrapper fetches pinned upstream sources, applies
 the required Solaris-specific patches, and builds Codex together with its
 native dependencies.
@@ -13,9 +13,15 @@ This repo fetches and builds pinned versions of:
 
 Current support status:
 
-- Solaris/x86 only for now
-- `uname -p` must report `i386`
-- SPARC is not supported in this wrapper
+- Solaris x64 (`uname -p` reports `i386`): full build, including V8 and
+  `codex-code-mode-host`.
+- Solaris SPARC (`uname -p` reports `sparc`): native 64-bit `codex` with direct
+  tool calls. GN, V8, and the code-mode host are not built or installed.
+  Code-mode configuration flags and model metadata cannot activate code mode
+  on this architecture. Node.js is not required.
+
+Use a separate checkout/build directory for each architecture; build output
+and installed toolchains must not be shared between x64 and SPARC.
 
 The wrapper keeps its own build state under:
 
@@ -34,14 +40,17 @@ bash build-codex.sh
 
 `build-codex.sh` is the main entry point. It:
 
-1. checks that the host is Solaris/x86
+1. checks that the host is Solaris x64 or SPARC
 2. downloads the pinned Rust toolchain into `build/toolchains`
 3. fetches the pinned GN, V8, and Codex sources into `build/src`
 4. vendors the Rust crate dependencies needed for V8 and Codex
 5. installs the pinned `bindgen-cli` helper needed by the V8 GN build
 6. builds and installs `gn`
 7. builds and installs `v8-solaris`
-8. builds and installs `codex` and its code-mode host
+8. builds and installs `codex` and, on x64, its code-mode host
+
+On SPARC, steps involving GN, V8, and its bindgen helper are skipped. Rust,
+native protoc, and the CLI's remaining native dependencies are still required.
 
 Installed artifacts end up in:
 
@@ -51,7 +60,7 @@ Installed artifacts end up in:
 - `build/install/codex/bin/codex`
 - `build/install/codex/bin/codex-code-mode-host`
 
-Codex 0.150 enables the separate code-mode host by default. Keep
+On x64, Codex enables the separate code-mode host by default. Keep
 `codex-code-mode-host` beside `codex` when copying or packaging this build.
 
 Quick verification:
@@ -63,11 +72,27 @@ build/install/codex/bin/codex --version
 build/install/codex/bin/codex-code-mode-host --help
 ```
 
+On SPARC, verify only `codex --version`; the GN, V8 and host paths above are
+not installed. To run the local integration fixture on either architecture:
+
+```sh
+python3.13 smoke-tools.py \
+  --codex "$PWD/build/install/codex/bin/codex" \
+  --catalog "$PWD/build/src/codex-rust-v0.154.0/codex-rs/models-manager/models.json" \
+  --output "$PWD/build/smoke-results"
+```
+
+Add `--expect-v8` on x64. Use a new output directory for each run. The fixture
+uses a local fake model server to verify file edits, shell execution and saved
+sessions; on x64 it also executes JavaScript through V8. It does not require
+credentials. It runs fixed commands in its scratch directory with sandboxing
+disabled, so it does not validate Solaris sandbox enforcement.
+
 ## Notes
 
 - Rust is downloaded only once into `build/toolchains`.
-- The wrapper uses the official Solaris Rust standalone installer target
-  `x86_64-pc-solaris`.
+- The wrapper selects the official Rust standalone installer for
+  `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
   `rust-v0.154.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an

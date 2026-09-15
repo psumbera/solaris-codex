@@ -5,6 +5,9 @@ set -euo pipefail
 # shellcheck source=common.sh
 source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
+check_supported_host
+[[ ${SOLARIS_CODEX_WITH_V8} == 1 ]] || die "V8 is not supported by the Solaris SPARC build"
+
 prepare_v8_vendor_config() {
   local extra_config=${BUILD_DIR}/v8-upstream-config.toml
 

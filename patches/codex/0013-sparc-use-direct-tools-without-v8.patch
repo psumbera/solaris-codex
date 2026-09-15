@@ -1,0 +1,58 @@
+From: Solaris Codex maintainers
+Subject: [PATCH] Keep Solaris SPARC on direct tools without a V8 host
+
+The standalone SPARC distribution builds codex-cli only. Do not launch a
+code-mode host or select JavaScript orchestration, even when requested by
+configuration or model metadata. All other architectures keep upstream behavior.
+
+--- a/codex-rs/features/src/lib.rs
++++ b/codex-rs/features/src/lib.rs
+@@ -486,6 +486,19 @@
+     }
+ 
+     pub fn enabled(&self, f: Feature) -> bool {
++        // The Solaris SPARC distribution does not include a V8 host.
++        if cfg!(all(target_os = "solaris", target_arch = "sparc64"))
++            && matches!(
++                f,
++                Feature::CodeMode
++                    | Feature::CodeModeOnly
++                    | Feature::CodeModeHost
++                    | Feature::CodeModePrewarm
++                    | Feature::CodeModeInterrupt
++            )
++        {
++            return false;
++        }
+         self.enabled.contains(&f)
+     }
+ 
+--- a/codex-rs/core/src/thread_manager.rs
++++ b/codex-rs/core/src/thread_manager.rs
+@@ -470,8 +470,9 @@
+             codex_apps_tools_cache,
+         ));
+         let code_mode_session_provider: Arc<dyn CodeModeSessionProvider> =
+-            if config.features.enabled(Feature::CodeModeHost)
+-                || config.code_mode.disable_in_process_fallback
++            if !cfg!(all(target_os = "solaris", target_arch = "sparc64"))
++                && (config.features.enabled(Feature::CodeModeHost)
++                    || config.code_mode.disable_in_process_fallback)
+             {
+                 Arc::new(ProcessOwnedCodeModeSessionProvider::default())
+             } else {
+--- a/codex-rs/core/src/tools/mod.rs
++++ b/codex-rs/core/src/tools/mod.rs
+@@ -66,6 +66,11 @@
+ }
+ 
+ pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
++    // Model metadata can request code mode independently of feature flags.
++    // This distribution has no SPARC V8 host, so expose the direct tools.
++    if cfg!(all(target_os = "solaris", target_arch = "sparc64")) {
++        return ToolMode::Direct;
++    }
+     model_info.tool_mode.unwrap_or_else(|| {
+         if turn_context.config.features.enabled(Feature::CodeModeOnly) {
+             ToolMode::CodeModeOnly
+
