@@ -69,8 +69,8 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
      internal_error(format!(
          "failed to encode or decode fs sandbox helper message: {err}"
-@@ -838,6 +867,59 @@
-         assert!(!policy.can_read_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
+@@ -854,6 +883,59 @@
+         assert!(!policy.can_read_local_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
  
 +    #[cfg(unix)]

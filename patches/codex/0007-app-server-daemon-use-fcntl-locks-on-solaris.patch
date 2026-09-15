@@ -23,7 +23,7 @@ index b525e61..68c85dc 100644
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -615,6 +615,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
+@@ -552,6 +552,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
      Err(err).context("failed to lock pid reservation")
  }
  
@@ -56,7 +56,7 @@ index b525e61..68c85dc 100644
 +    }
 +}
 +
- #[cfg(not(unix))]
+ #[cfg(not(any(unix, windows)))]
  fn try_lock_file(_file: &fs::File) -> Result<bool> {
      bail!("pid-managed app-server startup is unsupported on this platform")
 diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
@@ -72,7 +72,7 @@ index 5870075..95ff316 100644
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -842,6 +842,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+@@ -882,6 +882,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      Err(err).context("failed to lock daemon operation")
  }
  
@@ -105,6 +105,6 @@ index 5870075..95ff316 100644
 +    }
 +}
 +
- #[cfg(not(unix))]
+ #[cfg(not(any(unix, windows)))]
  fn try_lock_file(_file: &tokio::fs::File) -> Result<bool> {
      Ok(true)
