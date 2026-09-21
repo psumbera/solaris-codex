@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.154.0/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.155.1/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -94,7 +94,7 @@ disabled, so it does not validate Solaris sandbox enforcement.
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.154.0`, built from its `codex-rs/` workspace.
+  `rust-v0.155.1`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
