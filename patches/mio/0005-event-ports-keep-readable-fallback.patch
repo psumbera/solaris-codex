@@ -1,0 +1,254 @@
+Keep readable fallback polling active without spinning on writable sockets.
+
+Solaris can lose a later readable event-port edge after an fd is re-associated,
+so moving a drained readable direction entirely back to the event port can hang
+Tokio. Keep registered interests in the bounded fallback poll, but remove a
+continuously writable direction from its event-port association until poll(2)
+observes that it has drained. This preserves readable and EOF liveness while
+preventing POLLOUT from making port_getn return continuously.
+
+diff --git a/src/sys/unix/selector/event_ports.rs b/src/sys/unix/selector/event_ports.rs
+--- a/src/sys/unix/selector/event_ports.rs
++++ b/src/sys/unix/selector/event_ports.rs
+@@ -65,10 +65,9 @@ struct FdData {
+     associated: bool,
+     // Interests that also need to be checked with poll(2).
+     fallback_interests: Option<Interest>,
+-    // Whether the fallback interests are still associated with the event port.
+-    fallback_associated: bool,
+-    // Report the first writable result, but not continuous writable readiness.
+-    report_writable: bool,
++    // Writable readiness is level-triggered and normally continuous. Keep it
++    // out of the event port while fallback polling still sees it as ready.
++    fallback_writable: bool,
+ }
+ 
+ impl Selector {
+@@ -146,6 +145,27 @@ impl Selector {
+ }
+ 
+ impl SelectorState {
++    fn update_port_association(port: RawFd, fd: RawFd, data: &mut FdData) -> io::Result<()> {
++        let generation = data.generation.wrapping_add(1).max(1);
++        let port_interests = if data.fallback_writable {
++            data.interests.remove(Interest::WRITABLE)
++        } else {
++            Some(data.interests)
++        };
++
++        if let Some(port_interests) = port_interests {
++            associate(port, fd, port_interests, generation)?;
++            data.associated = true;
++        } else {
++            if data.associated {
++                dissociate(port, fd)?;
++            }
++            data.associated = false;
++        }
++        data.generation = generation;
++        Ok(())
++    }
++
+     fn select(
+         &self,
+         port: RawFd,
+@@ -304,35 +324,23 @@ impl SelectorState {
+                 });
+                 let Some(poll_events) = poll_events else {
+                     if event.portev_events & ERROR_EVENTS == 0 {
+-                        let generation = data.generation.wrapping_add(1).max(1);
+-                        associate(port, fd, data.interests, generation)?;
+-                        data.generation = generation;
+-                        data.associated = true;
+-                        data.fallback_interests = None;
+-                        data.fallback_associated = false;
+-                        data.report_writable = false;
++                        data.fallback_writable = false;
++                        data.fallback_interests = Some(data.interests);
++                        Self::update_port_association(port, fd, data)?;
+                         continue;
+                     }
+ 
+                     let poll_events = event.portev_events;
+                     if data.generation != generation && poll_events & current_interest_events == 0 {
+-                        let generation = data.generation.wrapping_add(1).max(1);
+-                        associate(port, fd, data.interests, generation)?;
+-                        data.generation = generation;
+-                        data.associated = true;
+-                        data.fallback_interests = None;
+-                        data.fallback_associated = false;
+-                        data.report_writable = false;
++                        data.fallback_writable = false;
++                        data.fallback_interests = Some(data.interests);
++                        Self::update_port_association(port, fd, data)?;
+                         continue;
+                     }
+ 
+-                    let generation = data.generation.wrapping_add(1).max(1);
+-                    associate(port, fd, data.interests, generation)?;
+-                    data.generation = generation;
+-                    data.associated = true;
+-                    data.fallback_interests = None;
+-                    data.fallback_associated = false;
+-                    data.report_writable = false;
++                    data.fallback_writable = poll_events & WRITE_EVENTS != 0;
++                    data.fallback_interests = Some(data.interests);
++                    Self::update_port_association(port, fd, data)?;
+                     push_event(
+                         events,
+                         libc::PORT_SOURCE_FD as libc::c_ushort,
+@@ -343,37 +351,20 @@ impl SelectorState {
+                     continue;
+                 };
++                let poll_events = poll_events | (event.portev_events & ERROR_EVENTS);
+                 if data.generation != generation && poll_events & current_interest_events == 0 {
+-                    let generation = data.generation.wrapping_add(1).max(1);
+-                    associate(port, fd, data.interests, generation)?;
+-                    data.generation = generation;
+-                    data.associated = true;
+-                    data.fallback_interests = None;
+-                    data.fallback_associated = false;
+-                    data.report_writable = false;
++                    data.fallback_writable = false;
++                    data.fallback_interests = Some(data.interests);
++                    Self::update_port_association(port, fd, data)?;
+                     continue;
+                 }
+ 
+-                // Event ports disassociate an fd after delivery. Re-associate
+-                // only interests that were not delivered, and use fallback
+-                // polling for delivered interests so sources that clear
+-                // readiness without reregistering can observe future events.
+-                let generation = data.generation.wrapping_add(1).max(1);
+-                let fallback_interests =
+-                    interests_from_event(poll_events & current_interest_events);
+-                let remaining_interests = match fallback_interests {
+-                    Some(fallback_interests) => data.interests.remove(fallback_interests),
+-                    None => Some(data.interests),
+-                };
+-                if let Some(remaining_interests) = remaining_interests {
+-                    associate(port, fd, remaining_interests, generation)?;
+-                    data.associated = true;
+-                } else {
+-                    data.associated = false;
+-                }
+-                data.generation = generation;
+-                data.fallback_interests = fallback_interests;
+-                data.fallback_associated = false;
+-                data.report_writable = false;
++                // Always keep a level-triggered fallback for readable events;
++                // Solaris event-port edges can be lost after re-association.
++                // A continuously writable direction stays out of the port
++                // until fallback polling observes that it has drained.
++                data.fallback_writable = poll_events & WRITE_EVENTS != 0;
++                data.fallback_interests = Some(data.interests);
++                Self::update_port_association(port, fd, data)?;
+ 
+                 push_event(
+                     events,
+@@ -422,38 +413,27 @@ impl SelectorState {
+             let data = fds.get_mut(&poll_fd.fd).unwrap();
+             let fallback_interests = data.fallback_interests.unwrap();
+             let revents = EventMask::from(poll_fd.revents);
+-            let ready_interests =
+-                interests_from_event(revents & interests_to_port(fallback_interests));
+-
+-            if !data.fallback_associated && ready_interests != Some(fallback_interests) {
+-                let generation = data.generation.wrapping_add(1).max(1);
+-                let port_interests = ready_interests
+-                    .and_then(|ready_interests| data.interests.remove(ready_interests))
+-                    .unwrap_or(data.interests);
+-                associate(port, poll_fd.fd, port_interests, generation)?;
+-                data.generation = generation;
+-                data.associated = true;
+-                data.fallback_interests = ready_interests;
++            let event_mask = revents & (interests_to_port(fallback_interests) | ERROR_EVENTS);
++            let was_fallback_writable = data.fallback_writable;
++            let fallback_writable = event_mask & WRITE_EVENTS != 0;
++            if fallback_writable != was_fallback_writable {
++                data.fallback_writable = fallback_writable;
++                Self::update_port_association(port, poll_fd.fd, data)?;
+             }
+ 
+-            let event_mask = revents & (interests_to_port(fallback_interests) | ERROR_EVENTS);
+-            // Writable fds are usually continuously ready. The event port has
+-            // already reported this readiness, so don't make every subsequent
+-            // select return immediately until the fd becomes non-writable.
+-            if (data.report_writable && event_mask & WRITE_EVENTS != 0)
+-                || event_mask & !WRITE_EVENTS != 0
+-            {
++            let mut report_events = event_mask & !WRITE_EVENTS;
++            if fallback_writable && !was_fallback_writable {
++                report_events |= WRITE_EVENTS;
++            }
++            if report_events != 0 {
+                 push_event(
+                     events,
+                     libc::PORT_SOURCE_FD as libc::c_ushort,
+                     poll_fd.fd as libc::uintptr_t,
+                     data.token,
+-                    event_mask,
++                    report_events,
+                 );
+             }
+-            if event_mask & WRITE_EVENTS != 0 {
+-                data.report_writable = false;
+-            }
+         }
+ 
+         Ok(fds.values().any(|data| data.fallback_interests.is_some()))
+@@ -480,8 +460,7 @@ impl SelectorState {
+                 generation: 1,
+                 associated: true,
+                 fallback_interests: Some(interests),
+-                fallback_associated: true,
+-                report_writable: true,
++                fallback_writable: false,
+             },
+         );
+         Ok(record)
+@@ -498,17 +477,12 @@ impl SelectorState {
+     ) -> io::Result<()> {
+         let mut fds = self.fds.lock().unwrap();
+         let data = fds.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
+-        let generation = data.generation.wrapping_add(1).max(1);
+-
+-        associate(port, fd, interests, generation)?;
+-
++        let fallback_writable = data.fallback_writable && interests.is_writable();
+         data.token = token;
+         data.interests = interests;
+-        data.generation = generation;
+-        data.associated = true;
+         data.fallback_interests = Some(interests);
+-        data.fallback_associated = true;
+-        data.report_writable = true;
++        data.fallback_writable = fallback_writable;
++        Self::update_port_association(port, fd, data)?;
+         Ok(())
+     }
+ 
+@@ -605,23 +579,6 @@ fn interests_to_port(interests: Interest) -> EventMask {
+     events
+ }
+ 
+-fn interests_from_event(events: EventMask) -> Option<Interest> {
+-    let mut interests = None;
+-
+-    if (events & READ_EVENTS) != 0 {
+-        interests = Some(Interest::READABLE);
+-    }
+-
+-    if (events & WRITE_EVENTS) != 0 {
+-        interests = Some(match interests {
+-            Some(interests) => interests.add(Interest::WRITABLE),
+-            None => Interest::WRITABLE,
+-        });
+-    }
+-
+-    interests
+-}
+-
+ #[repr(transparent)]
+ #[derive(Clone)]
+ pub struct Event(libc::port_event);

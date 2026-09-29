@@ -146,7 +146,11 @@ Those helpers remain scripted because they also update vendored crate
 `.cargo-checksum.json`, which makes static patch files awkward to maintain.
 The mio event-ports rewrite applies the upstream accepted changes from
 `https://github.com/tokio-rs/mio/pull/1962`, refreshed against the `mio 1.2.0`
-crate version locked by Codex.
+crate version locked by Codex. Its follow-up patches retain bounded `poll(2)`
+fallback for readable events that Solaris event ports can lose while keeping
+continuously writable sockets out of the event port, avoiding idle Tokio and
+Reqwest busy loops. Writable readiness is re-notified only after the bounded
+selector wait so later writes cannot become stranded.
 
 ## Maintainer Notes
 
