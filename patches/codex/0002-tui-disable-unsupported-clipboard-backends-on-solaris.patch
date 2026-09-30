@@ -3,7 +3,7 @@ clipboard backends that are not maintained or reliable on Solaris.
 
 What it does:
 - disables native arboard-backed clipboard dependencies on Solaris
-- returns a clear unsupported error for image paste on Solaris
+- returns clear unsupported errors for image and text paste on Solaris
 - keeps SSH and OSC 52 text copy available for remote terminal use
 
 Why it is needed:
@@ -28,35 +28,45 @@ index 6c0b83a..c231dee 100644
  
  
 diff --git a/codex-rs/tui/src/clipboard_copy.rs b/codex-rs/tui/src/clipboard_copy.rs
-index 1ad369d..8781d42 100644
+index 7e84d10..e8cc353 100644
 --- a/codex-rs/tui/src/clipboard_copy.rs
 +++ b/codex-rs/tui/src/clipboard_copy.rs
-@@ -235,7 +235,7 @@ fn is_wsl_session() -> bool {
- /// triggers `os_log` / `NSLog` output on stderr. Because the TUI owns the
- /// terminal, that stray output corrupts the display. We temporarily redirect
- /// fd 2 to `/dev/null` around the call to keep the screen clean.
--#[cfg(not(target_os = "android"))]
-+#[cfg(not(any(target_os = "android", target_os = "solaris")))]
- fn arboard_copy(text: &str, html: Option<&str>) -> Result<Option<ClipboardLease>, String> {
-     #[cfg(target_os = "macos")]
-     let _stderr_lock = STDERR_SUPPRESSION_MUTEX
-@@ -268,6 +268,11 @@ fn arboard_copy(_text: &str, _html: Option<&str>) -> Result<Option<ClipboardLease>, String> {
-     Err("native clipboard unavailable on Android".to_string())
+@@ -89,15 +89,19 @@ fn copy_to_clipboard(
+     begin_delivery: impl Fn() -> Result<(), String>,
+     osc52: impl Fn(&str) -> Result<(), String>,
+ ) -> Result<CopyOutcome, String> {
+-    #[cfg(not(target_os = "android"))]
++    #[cfg(not(any(target_os = "android", target_os = "solaris")))]
+     let native_copy = {
+         let clipboard = arboard::Clipboard::new();
+         move |text: &str, html: Option<&str>| arboard_copy(clipboard, text, html)
+     };
+     #[cfg(target_os = "android")]
+     let native_copy = |_text: &str, _html: Option<&str>| {
+         Err("native clipboard unavailable on Android".to_string())
+     };
++    #[cfg(target_os = "solaris")]
++    let native_copy = |_text: &str, _html: Option<&str>| {
++        Err("native clipboard unavailable on Solaris".to_string())
++    };
+     // Decide before propagating setup success or failure: either result could otherwise
+     // start a native write or fallback long after the user abandoned this request.
+     begin_delivery()?;
+@@ -232,7 +236,7 @@ pub(crate) fn is_wsl_session() -> bool {
  }
  
-+#[cfg(target_os = "solaris")]
-+fn arboard_copy(_text: &str, _html: Option<&str>) -> Result<Option<ClipboardLease>, String> {
-+    Err("native clipboard unavailable on Solaris".to_string())
-+}
-+
- /// Copy text into the Windows clipboard from a WSL process.
- #[cfg(target_os = "linux")]
- fn wsl_clipboard_copy(text: &str) -> Result<(), String> {
+ /// Write to the native clipboard. The TUI owns any process-wide stderr redirection.
+-#[cfg(not(target_os = "android"))]
++#[cfg(not(any(target_os = "android", target_os = "solaris")))]
+ fn arboard_copy(
+     clipboard: Result<arboard::Clipboard, arboard::Error>,
+     text: &str,
 diff --git a/codex-rs/tui/src/clipboard_paste.rs b/codex-rs/tui/src/clipboard_paste.rs
-index 55ca6ca..fc7754c 100644
+index 3d77471..56fd7d3 100644
 --- a/codex-rs/tui/src/clipboard_paste.rs
 +++ b/codex-rs/tui/src/clipboard_paste.rs
-@@ -1,5 +1,6 @@
+@@ -3,6 +3,7 @@ pub(crate) mod text;
+
  use std::path::Path;
  use std::path::PathBuf;
 +#[cfg(not(any(target_os = "android", target_os = "solaris")))]
@@ -103,3 +113,25 @@ index 55ca6ca..fc7754c 100644
  /// Normalize pasted text that may represent a filesystem path.
  ///
  /// Supports:
+diff --git a/codex-rs/tui/src/clipboard_paste/text.rs b/codex-rs/tui/src/clipboard_paste/text.rs
+--- a/codex-rs/tui/src/clipboard_paste/text.rs
++++ b/codex-rs/tui/src/clipboard_paste/text.rs
+@@ -24,9 +24,16 @@ pub(crate) fn read(deadline: Instant) -> Result<String, String> {
+-    #[cfg(not(target_os = "android"))]
++    #[cfg(not(any(target_os = "android", target_os = "solaris")))]
+     let text = match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
+         Ok(text) => text,
+         Err(arboard::Error::ContentNotAvailable) => String::new(),
+         Err(_) => return Err("clipboard text is unavailable".into()),
+     };
+     #[cfg(target_os = "android")]
+     let text = String::new();
+-    validate(text, deadline)
++    #[cfg(not(target_os = "solaris"))]
++    {
++        validate(text, deadline)
++    }
++    #[cfg(target_os = "solaris")]
++    {
++        Err("clipboard text paste is unsupported on Solaris".into())
++    }

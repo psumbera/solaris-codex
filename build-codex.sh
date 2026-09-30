@@ -473,8 +473,9 @@ PY2
 patch_tui_solaris_terminal_input() {
   local tui_rs=${CODEX_SRC_DIR}/tui/src/tui.rs
   local event_stream_rs=${CODEX_SRC_DIR}/tui/src/tui/event_stream.rs
+  local alternate_screen_rs=${CODEX_SRC_DIR}/tui/src/tui/alternate_screen.rs
 
-  python3 - "${tui_rs}" "${event_stream_rs}" <<'PY'
+  python3 - "${tui_rs}" "${event_stream_rs}" "${alternate_screen_rs}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -515,7 +516,7 @@ old = """pub fn set_modes() -> Result<()> {
     // Some terminals (notably legacy Windows consoles) do not support
     // keyboard enhancement flags. Attempt to enable them, but continue
     // gracefully if unsupported.
-    keyboard_modes::enable_keyboard_enhancement();
+    keyboard_modes::enable_keyboard_enhancement(&mut stdout());
 
     #[cfg(not(windows))]
     let _ = execute!(stdout(), EnableFocusChange);
@@ -541,7 +542,7 @@ new = """pub fn set_modes() -> Result<()> {
         // Some terminals (notably legacy Windows consoles) do not support
         // keyboard enhancement flags. Attempt to enable them, but continue
         // gracefully if unsupported.
-        keyboard_modes::enable_keyboard_enhancement();
+        keyboard_modes::enable_keyboard_enhancement(&mut stdout());
 
         #[cfg(not(windows))]
         let _ = execute!(stdout(), EnableFocusChange);
@@ -557,26 +558,12 @@ if new not in text:
         raise SystemExit("failed to patch tui.rs set_modes")
     text = text.replace(old, new, 1)
 
-old = """    match keyboard_restore {
-        KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(),
-        KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
-    }
-
-    if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
+old = """    if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
         first_error.get_or_insert(err);
     }
     let _ = execute!(stdout(), DisableFocusChange);
 """
-new = """    #[cfg(target_os = \"solaris\")]
-    let _ = keyboard_restore;
-
-    #[cfg(not(target_os = \"solaris\"))]
-    match keyboard_restore {
-        KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(),
-        KeyboardRestore::ResetAfterExit => keyboard_modes::reset_keyboard_reporting_after_exit(),
-    }
-
-    #[cfg(not(target_os = \"solaris\"))]
+new = """    #[cfg(not(target_os = \"solaris\"))]
     if let Err(err) = execute!(stdout(), DisableBracketedPaste) {
         first_error.get_or_insert(err);
     }
@@ -619,6 +606,7 @@ old = """    #[cfg(unix)]
                     cursor_position: None,
                     default_colors: None,
                     keyboard_enhancement_supported: None,
+                    terminal_app_over_ssh: None,
                 }
             }
         }
@@ -665,6 +653,7 @@ new = """    #[cfg(all(unix, not(target_os = \"solaris\")))]
         cursor_position: None,
         default_colors: None,
         keyboard_enhancement_supported: None,
+        terminal_app_over_ssh: None,
     };
 """
 if new not in text:
@@ -673,6 +662,58 @@ if new not in text:
     text = text.replace(old, new, 1)
 
 tui_rs.write_text(text)
+
+alternate_screen_rs = Path(sys.argv[3])
+text = alternate_screen_rs.read_text()
+
+old = """        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer);
+        self.keyboard_active.store(
+            !cfg!(windows) && !keyboard_modes::keyboard_enhancement_disabled(),
+            Ordering::Relaxed,
+        );
+"""
+new = """        #[cfg(not(target_os = \"solaris\"))]
+        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer);
+        #[cfg(target_os = \"solaris\")]
+        let mouse_capture = MouseCapture::Enabled;
+        self.keyboard_active.store(
+            !cfg!(any(windows, target_os = \"solaris\"))
+                && !keyboard_modes::keyboard_enhancement_disabled(),
+            Ordering::Relaxed,
+        );
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch alternate_screen.rs enter")
+    text = text.replace(old, new, 1)
+
+old = """        // The alternate stack is restored before the main stack, even for legacy overlays.
+        match keyboard_restore {
+            KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(writer),
+            KeyboardRestore::ResetAfterExit => {
+                keyboard_modes::reset_keyboard_reporting_after_exit(writer);
+            }
+        }
+        screen_result
+"""
+new = """        // The alternate stack is restored before the main stack, even for legacy overlays.
+        #[cfg(not(target_os = \"solaris\"))]
+        match keyboard_restore {
+            KeyboardRestore::PopStack => keyboard_modes::restore_keyboard_enhancement_stack(writer),
+            KeyboardRestore::ResetAfterExit => {
+                keyboard_modes::reset_keyboard_reporting_after_exit(writer);
+            }
+        }
+        #[cfg(target_os = \"solaris\")]
+        let _ = keyboard_restore;
+        screen_result
+"""
+if new not in text:
+    if old not in text:
+        raise SystemExit("failed to patch alternate_screen.rs restore")
+    text = text.replace(old, new, 1)
+
+alternate_screen_rs.write_text(text)
 
 event_stream_rs = Path(sys.argv[2])
 text = event_stream_rs.read_text()

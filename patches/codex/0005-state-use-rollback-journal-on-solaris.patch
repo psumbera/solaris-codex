@@ -23,7 +23,7 @@ diff --git a/codex-rs/state/Cargo.toml b/codex-rs/state/Cargo.toml
 index 0d781fb..30f8083 100644
 --- a/codex-rs/state/Cargo.toml
 +++ b/codex-rs/state/Cargo.toml
-@@ -11,11 +11,13 @@ codex-history = { workspace = true }
+@@ -11,13 +11,15 @@ codex-history = { workspace = true }
  codex-protocol = { workspace = true }
  codex-utils-absolute-path = { workspace = true }
  libsqlite3-sys = { workspace = true }
@@ -32,6 +32,8 @@ index 0d781fb..30f8083 100644
  serde = { workspace = true, features = ["derive"] }
  serde_json = { workspace = true }
  sqlx = { workspace = true }
+ sqlx-macros = { workspace = true }
+ sqlx-sqlite = { workspace = true }
  strum = { workspace = true, features = ["derive"] }
 +tempfile = { workspace = true }
  tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }

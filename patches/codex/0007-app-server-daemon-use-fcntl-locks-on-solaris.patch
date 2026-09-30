@@ -4,11 +4,28 @@ flock(2), but Rust libc does not expose that interface on Solaris.
 What it does:
 - keeps the existing flock-based lock path on other Unix targets
 - uses nonblocking fcntl(F_SETLK) write locks for Solaris daemon lock files
+- compile-gates an unreachable flock branch after Solaris selects the shared
+  installer directory-lock fallback
 - preserves the same busy-vs-error behavior for pid and operation locks
 
 Why it is needed:
 - without it, codex-app-server-daemon fails to build on Solaris because
   libc::flock, LOCK_EX, and LOCK_NB are unavailable
+
+diff --git a/codex-rs/app-server-daemon/src/install_lock.rs b/codex-rs/app-server-daemon/src/install_lock.rs
+--- a/codex-rs/app-server-daemon/src/install_lock.rs
++++ b/codex-rs/app-server-daemon/src/install_lock.rs
+@@ -109,7 +109,10 @@ pub(crate) async fn acquire_install_lock(root: &Path) -> Result<InstallLock> {
+                 let result = if use_lockf {
+                     unsafe { libc::lockf(file.as_raw_fd(), libc::F_TLOCK, 0) }
+                 } else {
++                    #[cfg(not(target_os = "solaris"))]
+                     unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }
++                    #[cfg(target_os = "solaris")]
++                    unreachable!("Solaris installer locking uses the directory fallback")
+                 };
+                 if result != 0 {
+                     return Err(std::io::Error::last_os_error());
 
 diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server-daemon/src/backend/pid.rs
 index b525e61..68c85dc 100644

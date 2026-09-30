@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.155.1/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.159.2/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -94,7 +94,7 @@ disabled, so it does not validate Solaris sandbox enforcement.
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.155.1`, built from its `codex-rs/` workspace.
+  `rust-v0.159.2`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -146,11 +146,11 @@ Those helpers remain scripted because they also update vendored crate
 `.cargo-checksum.json`, which makes static patch files awkward to maintain.
 The mio event-ports rewrite applies the upstream accepted changes from
 `https://github.com/tokio-rs/mio/pull/1962`, refreshed against the `mio 1.2.0`
-crate version locked by Codex. Its follow-up patches retain bounded `poll(2)`
-fallback for readable events that Solaris event ports can lose while keeping
-continuously writable sockets out of the event port, avoiding idle Tokio and
-Reqwest busy loops. Writable readiness is re-notified only after the bounded
-selector wait so later writes cannot become stranded.
+crate version locked by Codex. The fallback polling fix is the production
+change from `https://github.com/tokio-rs/mio/pull/2005` at commit `c045606`.
+It retains bounded `poll(2)` fallback for readiness that Solaris event ports
+can lose while preventing continuously writable sockets from causing an idle
+Tokio or Reqwest busy loop.
 
 ## Maintainer Notes
 

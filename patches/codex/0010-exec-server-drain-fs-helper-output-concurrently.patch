@@ -12,20 +12,18 @@ larger than a typical pipe buffer.
 diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
 --- a/codex-rs/exec-server/src/fs_sandbox.rs
 +++ b/codex-rs/exec-server/src/fs_sandbox.rs
-@@ -22,7 +22,6 @@
- use codex_utils_path_uri::PathUri;
- #[cfg(any(windows, test))]
+@@ -32,5 +32,4 @@ use codex_utils_pty::SpawnFallback;
  use tokio::io::AsyncBufReadExt;
 -#[cfg(any(windows, test))]
  use tokio::io::AsyncReadExt;
  use tokio::io::AsyncWriteExt;
- use tokio::process::Command;
-@@ -428,9 +427,35 @@
- 
+
+@@ -505,9 +504,35 @@ pub(crate) async fn reap_helper_after_response(
+
  #[cfg(not(windows))]
  pub(crate) async fn wait_for_helper_output(
--    child: tokio::process::Child,
-+    mut child: tokio::process::Child,
+-    child: Child,
++    mut child: Child,
  ) -> Result<std::process::Output, JSONRPCErrorError> {
 -    let output = child.wait_with_output().await.map_err(io_error)?;
 +    let mut stdout = child
@@ -61,7 +59,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 @@ -488,6 +513,10 @@
      internal_error(err.to_string())
  }
- 
+
 +fn join_error(err: tokio::task::JoinError) -> JSONRPCErrorError {
 +    internal_error(err.to_string())
 +}
@@ -72,7 +70,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 @@ -854,6 +883,59 @@
          assert!(!policy.can_read_local_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
- 
+
 +    #[cfg(unix)]
 +    #[tokio::test]
 +    async fn run_command_drains_large_helper_stdout_before_waiting() {
