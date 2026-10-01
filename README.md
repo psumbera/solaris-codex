@@ -152,6 +152,9 @@ patch series under `patches/codex/` before vendoring:
   honor `NO_PROXY`/`no_proxy` without reqwest system proxy autodetection.
 - `0010-exec-server-drain-fs-helper-output-concurrently.patch` keeps large
   filesystem-helper responses from blocking on a full stdout pipe.
+- `0014-features-disable-daemon-auto-start-on-solaris.patch` keeps ordinary
+  TUI startup in embedded mode because this distribution does not install the
+  complete standalone package tree required for daemon bootstrap.
 
 Before vendoring, `patch_tui_solaris_terminal_input()` keeps the TUI off
 terminal capability probes that stalled some Solaris PTYs, replaces the
@@ -175,8 +178,11 @@ The mio event-ports rewrite applies the upstream accepted changes from
 crate version locked by Codex. The fallback polling fix is the production
 change from `https://github.com/tokio-rs/mio/pull/2005` at commit `c045606`.
 It retains bounded `poll(2)` fallback for readiness that Solaris event ports
-can lose while preventing continuously writable sockets from causing an idle
-Tokio or Reqwest busy loop.
+can lose. Follow-up patches coalesce repeated event-port wakeups and preserve
+bounded writable re-notification across consecutive zero-timeout polls. The
+latter is required when Tokio clears cached write readiness and continues
+polling without blocking; without it, network writes can stall while the
+runtime spins on Solaris.
 
 ## Maintainer Notes
 

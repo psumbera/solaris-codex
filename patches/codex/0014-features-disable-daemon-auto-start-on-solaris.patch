@@ -1,0 +1,38 @@
+From: Solaris Codex maintainers
+Subject: [PATCH] Keep Solaris TUI startup in embedded mode by default
+
+The Solaris package installs the Codex executables directly rather than the
+complete standalone package tree. Automatic daemon bootstrap requires that
+tree and otherwise exits before the TUI starts because codex-package.json is
+not available.
+
+Disable daemon auto-start by default on Solaris so an ordinary `codex` launch
+continues to use its embedded app server. Users can still explicitly enable
+the feature when running a complete package.
+
+--- a/codex-rs/features/src/lib.rs
++++ b/codex-rs/features/src/lib.rs
+@@ -957,7 +957,7 @@ pub const FEATURES: &[FeatureSpec] = &[
+         id: Feature::DaemonAutoStart,
+         key: "daemon_auto_start",
+         stage: Stage::Stable,
+-        default_enabled: true,
++        default_enabled: !cfg!(target_os = "solaris"),
+     },
+     FeatureSpec {
+         id: Feature::TranscriptV2,
+--- a/codex-rs/features/src/tests.rs
++++ b/codex-rs/features/src/tests.rs
+@@ -27,6 +27,12 @@ fn under_development_features_are_disabled_by_default() {
+     }
+ }
+ 
++#[cfg(target_os = "solaris")]
++#[test]
++fn daemon_auto_start_is_disabled_by_default_on_solaris() {
++    assert!(!Features::with_defaults().enabled(Feature::DaemonAutoStart));
++}
++
+ #[test]
+ fn tool_registry_config_is_not_a_feature_toggle() {
+     let features: FeaturesToml = toml::from_str(

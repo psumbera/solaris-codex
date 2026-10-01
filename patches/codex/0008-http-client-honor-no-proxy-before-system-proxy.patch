@@ -15,11 +15,16 @@ https://github.com/openai/codex/issues/4242
 diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
-@@ -1315,7 +1315,7 @@ const FEATURES: &[FeatureSpec] = &[
+@@ -1315,7 +1315,11 @@ const FEATURES: &[FeatureSpec] = &[
          id: Feature::RespectSystemProxy,
          key: "respect_system_proxy",
-         stage: Stage::UnderDevelopment,
+-        stage: Stage::UnderDevelopment,
 -        default_enabled: false,
++        stage: if cfg!(target_os = "solaris") {
++            Stage::Stable
++        } else {
++            Stage::UnderDevelopment
++        },
 +        default_enabled: cfg!(target_os = "solaris"),
      },
      FeatureSpec {

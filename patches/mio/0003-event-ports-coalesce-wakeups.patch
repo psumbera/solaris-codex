@@ -1,0 +1,108 @@
+Coalesce repeated Solaris event-port wakeups.
+
+Unlike eventfd and pipe-backed wakers, port_send(3C) queues every user event.
+Tokio can therefore build an unbounded queue of identical reactor wakeups. A
+busy runtime then repeatedly receives full event batches and can starve normal
+I/O processing.
+
+Track pending user-event tokens in the selector state. Repeated wakes for an
+already pending token are covered by the queued event, and processing the event
+clears the token before returning it to the caller. The mutex orders concurrent
+wakes with event consumption so a wake is either coalesced into the event being
+delivered or queues a new event.
+
+Add a regression that verifies repeated wake calls produce one event and leave
+no second event queued.
+
+--- a/src/sys/unix/selector/event_ports.rs
++++ b/src/sys/unix/selector/event_ports.rs
+@@ -1,4 +1,4 @@
+-use std::collections::HashMap;
++use std::collections::{HashMap, HashSet};
+ use std::ops::{Deref, DerefMut};
+ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+ use std::sync::atomic::{AtomicUsize, Ordering};
+@@ -53,6 +53,7 @@ struct EventBuffer {
+ #[derive(Debug)]
+ struct SelectorState {
+     fds: Mutex<HashMap<RawFd, FdData>>,
++    pending_wakes: Mutex<HashSet<Token>>,
+ }
+ 
+ #[derive(Debug)]
+@@ -81,6 +82,7 @@ impl Selector {
+             events: EventBuffer::new(),
+             state: Arc::new(SelectorState {
+                 fds: Mutex::new(HashMap::new()),
++                pending_wakes: Mutex::new(HashSet::new()),
+             }),
+         })
+     }
+@@ -315,11 +317,13 @@ impl SelectorState {
+         let mut poll_fds = poll_fds.iter();
+         for event in raw_events {
+             if event.portev_source == libc::PORT_SOURCE_USER as libc::c_ushort {
++                let token = Token(event.portev_user as usize);
++                self.pending_wakes.lock().unwrap().remove(&token);
+                 push_event(
+                     events,
+                     libc::PORT_SOURCE_USER as libc::c_ushort,
+                     0,
+-                    Token(event.portev_user as usize),
++                    token,
+                     event.portev_events,
+                 );
+             } else if event.portev_source == libc::PORT_SOURCE_FD as libc::c_ushort {
+@@ -528,15 +532,49 @@ impl SelectorState {
+     }
+ 
+     fn wake(&self, port: RawFd, token: Token) -> io::Result<()> {
++        let mut pending_wakes = self.pending_wakes.lock().unwrap();
++        if !pending_wakes.insert(token) {
++            return Ok(());
++        }
++
+         // `events` is controlled by Mio for user events. Solaris returns it
+         // as `portev_events`, so use `POLLIN` to make waker events readable
+         // like the other selector implementations.
+-        syscall!(port_send(
++        let result = syscall!(port_send(
+             port,
+             libc::POLLIN as libc::c_int,
+             usize::from(token) as *mut libc::c_void,
+-        ))
+-        .map(|_| ())
++        ));
++        if result.is_err() {
++            pending_wakes.remove(&token);
++        }
++        result.map(|_| ())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn repeated_wakes_are_coalesced() {
++        let mut selector = Selector::new().unwrap();
++        let token = Token(42);
++        let mut events = Events::with_capacity(1);
++
++        for _ in 0..64 {
++            selector.wake(token).unwrap();
++        }
++        selector
++            .select(&mut events, Some(Duration::ZERO))
++            .unwrap();
++        assert_eq!(events.len(), 1);
++        assert_eq!(events[0].portev_user as usize, usize::from(token));
++
++        selector
++            .select(&mut events, Some(Duration::ZERO))
++            .unwrap();
++        assert!(events.is_empty());
+     }
+ }
+ 
