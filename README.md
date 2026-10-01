@@ -88,6 +88,32 @@ sessions; on x64 it also executes JavaScript through V8. It does not require
 credentials. It runs fixed commands in its scratch directory with sandboxing
 disabled, so it does not validate Solaris sandbox enforcement.
 
+## Monitoring Running Sessions
+
+`codex-status.py` shows this user's running Codex TUI sessions without a
+shared app-server daemon or access to Codex's SQLite databases:
+
+```sh
+python3.13 codex-status.py
+python3.13 codex-status.py --watch 5
+python3.13 codex-status.py --json
+```
+
+The monitor obtains the executable, working directory and open rollout files
+from Solaris `/proc`. It uses only rollout metadata and lifecycle event types;
+it does not print prompts, responses, titles or tool contents. `WORKING` means
+the latest turn started and has not recorded completion, while `IDLE` means
+the process is alive and its latest turn completed or was aborted. The `LAST`
+column shows the age of the most recent rollout write, which helps identify a
+possibly stalled `WORKING` session. Approval and user-input waits remain
+`WORKING` because their turn is still active.
+
+Only processes owned by the invoking user are reported. This avoids the
+permissions and privacy problems associated with inspecting other users'
+process descriptors and session files. Because the monitor never opens
+SQLite, it adds no database locks and works with both local and NFS-backed
+`CODEX_HOME` directories.
+
 ## Notes
 
 - Rust is downloaded only once into `build/toolchains`.
