@@ -40,10 +40,10 @@ index 0d781fb..30f8083 100644
  tracing = { workspace = true }
  tracing-subscriber = { workspace = true }
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index 4bb65c6..005798f 100644
+index 4d1c9e9..0858be5 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -13,6 +13,8 @@ use crate::telemetry::DbKind;
+@@ -14,12 +14,37 @@ use crate::telemetry::DbKind;
  use codex_utils_absolute_path::AbsolutePathBuf;
  use log::LevelFilter;
  use sqlx::ConnectOptions;
@@ -52,8 +52,8 @@ index 4bb65c6..005798f 100644
  use sqlx::Error;
  use sqlx::SqlitePool;
  use sqlx::migrate::Migrator;
-@@ -21,6 +23,28 @@ use sqlx::sqlite::SqliteConnectOptions;
- use sqlx::sqlite::SqliteJournalMode;
+ use sqlx::sqlite::SqliteConnectOptions;
++use sqlx::sqlite::SqliteJournalMode;
  use sqlx::sqlite::SqlitePoolOptions;
  use sqlx::sqlite::SqliteSynchronous;
 +#[cfg(target_os = "solaris")]
@@ -81,7 +81,7 @@ index 4bb65c6..005798f 100644
  use std::path::Path;
  use std::path::PathBuf;
  use std::time::Duration;
-@@ -33,6 +57,253 @@ const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
+@@ -32,6 +57,253 @@ const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
  const STATE_DB_FILENAME: &str = "state_5.sqlite";
  const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
  
@@ -335,7 +335,7 @@ index 4bb65c6..005798f 100644
  #[derive(Clone, Copy)]
  struct RuntimeDbSpec {
      label: &'static str,
-@@ -276,10 +547,16 @@ impl SqliteConfig {
+@@ -308,6 +580,17 @@ impl SqliteConfig {
 
      /// Open a writable Codex SQLite database, creating it if necessary.
      pub async fn open_read_write_pool(&self, path: &Path) -> Result<SqlitePool, Error> {
@@ -344,25 +344,40 @@ index 4bb65c6..005798f 100644
 +        if journal_mode == SqliteJournalMode::Delete {
 +            prepare_solaris_sqlite_for_rollback_journal(path).await?;
 +        }
++        let journal_mode_pragma = if journal_mode == SqliteJournalMode::Delete {
++            "PRAGMA journal_mode = DELETE"
++        } else {
++            "PRAGMA journal_mode = WAL"
++        };
 +
          let options = SqliteConnectOptions::new()
              .filename(path)
              .create_if_missing(true)
--            .journal_mode(SqliteJournalMode::Wal)
-+            .journal_mode(journal_mode)
              .synchronous(SqliteSynchronous::Normal)
-             .auto_vacuum(SqliteAutoVacuum::Incremental)
              .busy_timeout(Duration::from_secs(5))
-@@ -303,3 +580,70 @@ impl SqliteConfig {
-             .await
-     }
+@@ -342,7 +625,7 @@ impl SqliteConfig {
+                                 .execute(&mut *connection)
+                                 .await?;
+                         }
+-                        sqlx::query("PRAGMA journal_mode = WAL")
++                        sqlx::query(journal_mode_pragma)
+                             .execute(connection)
+                             .await?;
+                         Ok(())
+diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_tests.rs
+index d9372dd..2ba47d5 100644
+--- a/codex-rs/state/src/sqlite_tests.rs
++++ b/codex-rs/state/src/sqlite_tests.rs
+@@ -121,3 +121,70 @@ async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::R
+         .await;
+     Ok(())
  }
 +
-+#[cfg(all(test, target_os = "solaris"))]
-+mod tests {
-+    use super::prepare_solaris_sqlite_for_rollback_journal;
-+    use super::sqlite_path_uses_wal;
-+    use super::sqlite_sidecar_path;
++#[cfg(target_os = "solaris")]
++mod solaris {
++    use super::super::prepare_solaris_sqlite_for_rollback_journal;
++    use super::super::sqlite_path_uses_wal;
++    use super::super::sqlite_sidecar_path;
 +    use sqlx::ConnectOptions;
 +    use sqlx::Connection;
 +    use sqlx::sqlite::SqliteConnectOptions;

@@ -675,7 +675,11 @@ old = """        let mouse_capture = keyboard_modes::enable_keyboard_enhancement
 new = """        #[cfg(not(target_os = \"solaris\"))]
         let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer);
         #[cfg(target_os = \"solaris\")]
-        let mouse_capture = MouseCapture::Enabled;
+        // The Solaris event source intentionally uses a small keyboard-only
+        // reader instead of crossterm's EventStream. Leave mouse handling to
+        // the terminal or multiplexer so SGR mouse reports are not parsed as
+        // escape keys and ordinary terminal text selection keeps working.
+        let mouse_capture = MouseCapture::DisabledByTmux;
         self.keyboard_active.store(
             !cfg!(any(windows, target_os = \"solaris\"))
                 && !keyboard_modes::keyboard_enhancement_disabled(),
@@ -712,6 +716,39 @@ if new not in text:
     if old not in text:
         raise SystemExit("failed to patch alternate_screen.rs restore")
     text = text.replace(old, new, 1)
+
+marker = """#[cfg(test)]
+#[path = "alternate_screen_tests.rs"]
+mod tests;
+"""
+solaris_test = """#[cfg(all(test, target_os = "solaris"))]
+mod solaris_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_mouse_reporting_stays_disabled() {
+        let screen = AlternateScreen::default();
+        let mut output = Vec::new();
+
+        screen.enter(&mut output, /*capture_mouse*/ true).unwrap();
+        for sequence in [
+            b"\\x1b[?1000h".as_slice(),
+            b"\\x1b[?1002h".as_slice(),
+            b"\\x1b[?1003h".as_slice(),
+            b"\\x1b[?1006h".as_slice(),
+        ] {
+            assert!(!output.windows(sequence.len()).any(|bytes| bytes == sequence));
+        }
+        assert!(screen.mouse_capture_disabled.load(Ordering::Relaxed));
+        screen.leave(&mut output).unwrap();
+    }
+}
+
+"""
+if solaris_test not in text:
+    if marker not in text:
+        raise SystemExit("failed to add alternate_screen.rs Solaris mouse test")
+    text = text.replace(marker, solaris_test + marker, 1)
 
 alternate_screen_rs.write_text(text)
 

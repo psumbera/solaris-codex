@@ -11,10 +11,10 @@ Why it is needed:
   at runtime when clipboard actions are attempted on Solaris
 
 diff --git a/codex-rs/tui/Cargo.toml b/codex-rs/tui/Cargo.toml
-index 6c0b83a..c231dee 100644
+index 9d61157..00cdce5 100644
 --- a/codex-rs/tui/Cargo.toml
 +++ b/codex-rs/tui/Cargo.toml
-@@ -140,9 +140,9 @@ windows-sys = { version = "0.52", features = [
+@@ -165,9 +165,9 @@ windows-sys = { version = "0.52", features = [
  ] }
  winsplit = "0.1"
  
@@ -28,10 +28,10 @@ index 6c0b83a..c231dee 100644
  
  
 diff --git a/codex-rs/tui/src/clipboard_copy.rs b/codex-rs/tui/src/clipboard_copy.rs
-index 7e84d10..e8cc353 100644
+index c08b881..92d537a 100644
 --- a/codex-rs/tui/src/clipboard_copy.rs
 +++ b/codex-rs/tui/src/clipboard_copy.rs
-@@ -89,15 +89,19 @@ fn copy_to_clipboard(
+@@ -95,7 +95,7 @@ fn copy_to_clipboard(
      begin_delivery: impl Fn() -> Result<(), String>,
      osc52: impl Fn(&str) -> Result<(), String>,
  ) -> Result<CopyOutcome, String> {
@@ -40,8 +40,7 @@ index 7e84d10..e8cc353 100644
      let native_copy = {
          let clipboard = arboard::Clipboard::new();
          move |text: &str, html: Option<&str>| arboard_copy(clipboard, text, html)
-     };
-     #[cfg(target_os = "android")]
+@@ -104,6 +104,10 @@ fn copy_to_clipboard(
      let native_copy = |_text: &str, _html: Option<&str>| {
          Err("native clipboard unavailable on Android".to_string())
      };
@@ -52,7 +51,7 @@ index 7e84d10..e8cc353 100644
      // Decide before propagating setup success or failure: either result could otherwise
      // start a native write or fallback long after the user abandoned this request.
      begin_delivery()?;
-@@ -232,7 +236,7 @@ pub(crate) fn is_wsl_session() -> bool {
+@@ -243,7 +247,7 @@ pub(crate) fn is_wsl_session() -> bool {
  }
  
  /// Write to the native clipboard. The TUI owns any process-wide stderr redirection.
@@ -62,18 +61,19 @@ index 7e84d10..e8cc353 100644
      clipboard: Result<arboard::Clipboard, arboard::Error>,
      text: &str,
 diff --git a/codex-rs/tui/src/clipboard_paste.rs b/codex-rs/tui/src/clipboard_paste.rs
-index 3d77471..56fd7d3 100644
+index cc5489d..376f2e9 100644
 --- a/codex-rs/tui/src/clipboard_paste.rs
 +++ b/codex-rs/tui/src/clipboard_paste.rs
-@@ -3,6 +3,7 @@ pub(crate) mod text;
-
+@@ -4,6 +4,7 @@ pub(crate) mod text;
+-
++
  use std::path::Path;
  use std::path::PathBuf;
 +#[cfg(not(any(target_os = "android", target_os = "solaris")))]
  use tempfile::Builder;
  
  #[derive(Debug, Clone)]
-@@ -47,7 +48,7 @@ pub struct PastedImageInfo {
+@@ -51,7 +52,7 @@ pub struct PastedImageInfo {
  }
  
  /// Capture image from system clipboard, encode to PNG, and return bytes + info.
@@ -82,7 +82,7 @@ index 3d77471..56fd7d3 100644
  pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageError> {
      let _span = tracing::debug_span!("paste_image_as_png").entered();
      tracing::debug!("attempting clipboard image read");
-@@ -116,8 +117,15 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
+@@ -120,8 +121,15 @@ pub fn paste_image_as_png() -> Result<(Vec<u8>, PastedImageInfo), PasteImageErro
      ))
  }
  
@@ -99,8 +99,8 @@ index 3d77471..56fd7d3 100644
  pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImageError> {
      // First attempt: read image from system clipboard via arboard (native paths or image data).
      match paste_image_as_png() {
-@@ -242,6 +250,13 @@ pub(crate) fn normalize_pasted_search_query(pasted: &str) -> Option<String> {
-     (!normalized.is_empty()).then_some(normalized)
+@@ -240,6 +248,13 @@ pub fn paste_image_to_temp_png() -> Result<(PathBuf, PastedImageInfo), PasteImag
+     ))
  }
  
 +#[cfg(target_os = "solaris")]
@@ -110,28 +110,35 @@ index 3d77471..56fd7d3 100644
 +    ))
 +}
 +
- /// Normalize pasted text that may represent a filesystem path.
- ///
- /// Supports:
+ /// Normalize pasted text for a single-line search query.
+ pub(crate) fn normalize_pasted_search_query(pasted: &str) -> Option<String> {
+     let normalized = pasted.split_whitespace().collect::<Vec<_>>().join(" ");
 diff --git a/codex-rs/tui/src/clipboard_paste/text.rs b/codex-rs/tui/src/clipboard_paste/text.rs
+index 32fcb1b..c3e31e6 100644
 --- a/codex-rs/tui/src/clipboard_paste/text.rs
 +++ b/codex-rs/tui/src/clipboard_paste/text.rs
-@@ -24,9 +24,16 @@ pub(crate) fn read(deadline: Instant) -> Result<String, String> {
+@@ -21,7 +21,7 @@ pub(crate) fn read(deadline: Instant) -> Result<String, String> {
+             .map_err(|_| "could not start clipboard reader")?
+             .block_on(read_command(command, deadline));
+     }
 -    #[cfg(not(target_os = "android"))]
 +    #[cfg(not(any(target_os = "android", target_os = "solaris")))]
-     let text = match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
-         Ok(text) => text,
-         Err(arboard::Error::ContentNotAvailable) => String::new(),
-         Err(_) => return Err("clipboard text is unavailable".into()),
-     };
-     #[cfg(target_os = "android")]
-     let text = String::new();
--    validate(text, deadline)
-+    #[cfg(not(target_os = "solaris"))]
-+    {
-+        validate(text, deadline)
-+    }
+     {
+         native_result(
+             arboard::Clipboard::new().and_then(|mut clipboard| clipboard.get_text()),
+@@ -32,9 +32,13 @@ pub(crate) fn read(deadline: Instant) -> Result<String, String> {
+     {
+         validate(String::new(), deadline)
+     }
 +    #[cfg(target_os = "solaris")]
 +    {
 +        Err("clipboard text paste is unsupported on Solaris".into())
 +    }
+ }
+-
++
+-#[cfg(not(target_os = "android"))]
++#[cfg(not(any(target_os = "android", target_os = "solaris")))]
+ pub(crate) fn native_result(
+     result: Result<String, arboard::Error>,
+     deadline: Instant,

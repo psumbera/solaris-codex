@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.159.2/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.160.0/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -120,7 +120,7 @@ SQLite, it adds no database locks and works with both local and NFS-backed
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.159.2`, built from its `codex-rs/` workspace.
+  `rust-v0.160.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -159,8 +159,10 @@ patch series under `patches/codex/` before vendoring:
 Before vendoring, `patch_tui_solaris_terminal_input()` keeps the TUI off
 terminal capability probes that stalled some Solaris PTYs, replaces the
 unreliable default `crossterm::event::EventStream` path with a Solaris input
-reader, prefers an ASCII-safe presentation on older terminals, and redraws the
-onboarding flow so the actionable step stays visible on smaller PTYs.
+reader, leaves mouse reporting to the terminal or multiplexer so normal text
+selection remains available, prefers an ASCII-safe presentation on older
+terminals, and redraws the onboarding flow so the actionable step stays visible
+on smaller PTYs.
 
 After `cargo vendor`, `build-codex.sh` still applies the remaining Solaris
 vendored-crate rewrites in place:

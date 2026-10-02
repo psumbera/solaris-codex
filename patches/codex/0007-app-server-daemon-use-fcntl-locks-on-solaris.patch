@@ -15,12 +15,15 @@ Why it is needed:
 diff --git a/codex-rs/app-server-daemon/src/install_lock.rs b/codex-rs/app-server-daemon/src/install_lock.rs
 --- a/codex-rs/app-server-daemon/src/install_lock.rs
 +++ b/codex-rs/app-server-daemon/src/install_lock.rs
-@@ -109,7 +109,10 @@ pub(crate) async fn acquire_install_lock(root: &Path) -> Result<InstallLock> {
+@@ -109,7 +109,12 @@ pub(crate) async fn acquire_install_lock(root: &Path) -> Result<InstallLock> {
                  let result = if use_lockf {
                      unsafe { libc::lockf(file.as_raw_fd(), libc::F_TLOCK, 0) }
                  } else {
 +                    #[cfg(not(target_os = "solaris"))]
-                     unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }
+-                    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }
++                    unsafe {
++                        libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB)
++                    }
 +                    #[cfg(target_os = "solaris")]
 +                    unreachable!("Solaris installer locking uses the directory fallback")
                  };
