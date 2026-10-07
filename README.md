@@ -88,6 +88,18 @@ sessions; on x64 it also executes JavaScript through V8. It does not require
 credentials. It runs fixed commands in its scratch directory with sandboxing
 disabled, so it does not validate Solaris sandbox enforcement.
 
+To test the final installed binary's SQLite startup on Solaris NFS, add
+`--nfs-root "$HOME/.codex-testing"` (an existing NFS directory) and use
+a new local output directory name. The fixture creates isolated NFS
+`CODEX_HOME` directories and checks fresh databases, existing WAL snapshots,
+and data committed only to WAL. It verifies migrations, preserved data,
+DELETE journal mode, and absence of WAL/SHM sidecars after each tool turn.
+It retains all fixtures for inspection and does not use real credentials.
+
+Patch syntax is validated with Git before GNU patch applies any series;
+incorrect hunk lengths can otherwise silently omit changes even with zero
+fuzz. Run `python3.13 -m unittest test_patch_series.py` to check that gate.
+
 ## Monitoring Running Sessions
 
 `codex-status.py` shows this user's running Codex TUI sessions without a

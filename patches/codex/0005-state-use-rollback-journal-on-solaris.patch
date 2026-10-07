@@ -335,7 +335,7 @@ index 4d1c9e9..0858be5 100644
  #[derive(Clone, Copy)]
  struct RuntimeDbSpec {
      label: &'static str,
-@@ -308,6 +580,17 @@ impl SqliteConfig {
+@@ -308,8 +580,19 @@ impl SqliteConfig {
 
      /// Open a writable Codex SQLite database, creating it if necessary.
      pub async fn open_read_write_pool(&self, path: &Path) -> Result<SqlitePool, Error> {

@@ -7,10 +7,13 @@ operate in an explicitly provided scratch output directory.
 
 import argparse
 import copy
+from contextlib import closing
 import http.server
 import json
 import os
 from pathlib import Path
+import shutil
+import sqlite3
 import subprocess
 import threading
 import zlib
@@ -24,13 +27,66 @@ def specs(tools, namespace=None):
             yield namespace, tool
 
 
+def seed_nfs_state(root, config_home, mode):
+    """Exercise fresh state, a WAL snapshot, and data committed only to WAL."""
+    if mode == "direct":
+        return "fresh"
+    source_path = root / "state-seed.sqlite"
+    destination = config_home / "state_5.sqlite"
+    with closing(sqlite3.connect(source_path)) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute("CREATE TABLE nfs_smoke_seed (value INTEGER)")
+        connection.execute("INSERT INTO nfs_smoke_seed VALUES (160)")
+        connection.commit()
+        if mode == "code_mode":
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        shutil.copyfile(source_path, destination)
+        wal = Path(str(source_path) + "-wal")
+        shutil.copyfile(wal, Path(str(destination) + "-wal"))
+        if mode == "code_mode_only":
+            assert wal.stat().st_size > 0
+            # Stale SHM is deliberately unusable. Conversion must not copy it.
+            Path(str(destination) + "-shm").write_bytes(b"stale shm")
+        else:
+            # Match the reported failure: WAL header, empty WAL, existing SHM.
+            assert wal.stat().st_size == 0
+            shutil.copyfile(Path(str(source_path) + "-shm"),
+                            Path(str(destination) + "-shm"))
+    assert destination.read_bytes()[18:20] == b"\x02\x02"
+    return "WAL-only data" if mode == "code_mode_only" else "WAL snapshot"
+
+
+def verify_nfs_state(config_home, seeded):
+    databases = list(config_home.glob("*.sqlite"))
+    assert (config_home / "state_5.sqlite") in databases, "missing state database"
+    for path in databases:
+        # Inspect bytes first: opening SQLite could hide an incorrect WAL header.
+        with path.open("rb") as stream:
+            header = stream.read(20)
+        assert header[18:20] == b"\x01\x01", (path, header[18:20])
+        assert not Path(str(path) + "-wal").exists(), path
+        assert not Path(str(path) + "-shm").exists(), path
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+        try:
+            assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "delete", path
+            assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok", path
+            assert connection.execute("SELECT count(*) FROM _sqlx_migrations").fetchone()[0] > 0, path
+            if path.name == "state_5.sqlite" and seeded != "fresh":
+                assert connection.execute("SELECT value FROM nfs_smoke_seed").fetchone()[0] == 160
+        finally:
+            connection.close()
+
+
 def run_case(args, mode):
     root = args.output / mode
     root.mkdir(parents=True, exist_ok=False)
     work = root / "work"
     work.mkdir()
-    config_home = root / "config"
-    config_home.mkdir()
+    config_home = (args.nfs_root / args.output.name / mode
+                   if args.nfs_root else root / "config")
+    config_home.mkdir(parents=True, mode=0o700)
+    seeded = seed_nfs_state(root, config_home, mode) if args.nfs_root else None
     scratch = root / "tmp"
     scratch.mkdir()
     catalog = json.loads(args.catalog.read_text())
@@ -154,6 +210,9 @@ def run_case(args, mode):
         assert "SMOKE_COMPLETE" in result.stdout, result.stdout[-3000:]
         assert len(requests) == (2 if args.expect_v8 and mode != "direct" else 3), len(requests)
         assert list(config_home.rglob("rollout-*.jsonl")), "missing persisted session"
+        if args.nfs_root:
+            verify_nfs_state(config_home, seeded)
+            print(f"PASS NFS {mode}: {seeded}, migrations, DELETE mode", flush=True)
         print(f"PASS {mode}: {'V8' if args.expect_v8 and mode != 'direct' else 'direct tools'}", flush=True)
     finally:
         server.shutdown()
@@ -166,6 +225,17 @@ if __name__ == "__main__":
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expect-v8", action="store_true")
+    parser.add_argument("--nfs-root", type=Path,
+                        help="existing Solaris NFS directory for isolated test CODEX_HOME trees")
     options = parser.parse_args()
+    if options.nfs_root:
+        options.nfs_root = options.nfs_root.resolve(strict=True)
+        filesystem = subprocess.check_output(
+            ["/usr/bin/df", "-n", str(options.nfs_root)], text=True,
+        ).split()[-1]
+        if filesystem != "nfs":
+            parser.error("--nfs-root must be on NFS")
+        if (options.nfs_root / options.output.name).exists():
+            parser.error("NFS test home already exists; use a new output directory name")
     for selected_mode in ["direct", "code_mode", "code_mode_only"]:
         run_case(options, selected_mode)

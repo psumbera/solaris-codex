@@ -294,6 +294,16 @@ apply_patch_series() {
 
   [[ -d "${patch_dir}" ]] || return 0
 
+  # GNU patch can treat later hunks as prose after an incorrect hunk count
+  # and still return success. Validate every diff before modifying sources;
+  # neither a zero-fuzz dry run nor a reverse check catches that omission.
+  need_cmd git
+  for patch in "${patch_dir}"/*.patch; do
+    [[ -e "${patch}" ]] || continue
+    git apply --numstat "${patch}" >/dev/null || \
+      die "invalid patch syntax: ${patch}"
+  done
+
   for patch in "${patch_dir}"/*.patch; do
     [[ -e "${patch}" ]] || continue
     if (
