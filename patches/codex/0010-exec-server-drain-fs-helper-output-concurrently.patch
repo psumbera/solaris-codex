@@ -67,7 +67,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
      internal_error(format!(
          "failed to encode or decode fs sandbox helper message: {err}"
-@@ -854,6 +883,59 @@
+@@ -854,6 +883,58 @@
          assert!(!policy.can_read_local_path_with_cwd(alias_parent.as_path(), cwd.as_path()));
      }
 
@@ -103,7 +103,6 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +            network_environment_id: None,
 +            sandbox: codex_sandboxing::SandboxType::None,
 +            windows_sandbox_level: codex_protocol::config_types::WindowsSandboxLevel::Disabled,
-+            windows_sandbox_private_desktop: false,
 +            permission_profile,
 +            arg0: None,
 +        };

@@ -23,9 +23,9 @@ diff --git a/codex-rs/state/Cargo.toml b/codex-rs/state/Cargo.toml
 index 0d781fb..30f8083 100644
 --- a/codex-rs/state/Cargo.toml
 +++ b/codex-rs/state/Cargo.toml
-@@ -11,13 +11,15 @@ codex-history = { workspace = true }
- codex-protocol = { workspace = true }
+@@ -12,13 +12,15 @@ codex-protocol = { workspace = true }
  codex-utils-absolute-path = { workspace = true }
+ file-id = { workspace = true }
  libsqlite3-sys = { workspace = true }
 +libc = { workspace = true }
  log = { workspace = true }
@@ -81,7 +81,7 @@ index 4d1c9e9..0858be5 100644
  use std::path::Path;
  use std::path::PathBuf;
  use std::time::Duration;
-@@ -32,6 +57,253 @@ const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
+@@ -38,6 +63,253 @@ const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
  const STATE_DB_FILENAME: &str = "state_5.sqlite";
  const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
  
@@ -332,13 +332,14 @@ index 4d1c9e9..0858be5 100644
 +    }
 +}
 +
- #[derive(Clone, Copy)]
- struct RuntimeDbSpec {
-     label: &'static str,
-@@ -308,8 +580,19 @@ impl SqliteConfig {
-
-     /// Open a writable Codex SQLite database, creating it if necessary.
-     pub async fn open_read_write_pool(&self, path: &Path) -> Result<SqlitePool, Error> {
+ #[derive(Clone, Copy, Eq, PartialEq)]
+ enum RecoveryMode {
+     BackupAndRebuild,
+@@ -351,9 +623,20 @@ impl SqliteConfig {
+         path: &Path,
+         recover_spec: Option<RuntimeDbSpec>,
+         telemetry_override: Option<&dyn DbTelemetry>,
+     ) -> anyhow::Result<SqlitePool> {
 +        let journal_mode = sqlite_journal_mode(path)?;
 +        #[cfg(target_os = "solaris")]
 +        if journal_mode == SqliteJournalMode::Delete {
@@ -350,25 +351,25 @@ index 4d1c9e9..0858be5 100644
 +            "PRAGMA journal_mode = WAL"
 +        };
 +
+         let recovery = recover_spec.map_or(RecoveryMode::Unavailable, |spec| spec.recovery);
          let options = SqliteConnectOptions::new()
              .filename(path)
              .create_if_missing(true)
              .synchronous(SqliteSynchronous::Normal)
-             .busy_timeout(Duration::from_secs(5))
-@@ -342,7 +625,7 @@ impl SqliteConfig {
-                                 .execute(&mut *connection)
+@@ -388,7 +671,7 @@ impl SqliteConfig {
+                                     .execute(&mut *connection)
+                                     .await?;
+                             }
+-                            sqlx::query("PRAGMA journal_mode = WAL")
++                            sqlx::query(journal_mode_pragma)
+                                 .execute(connection)
                                  .await?;
-                         }
--                        sqlx::query("PRAGMA journal_mode = WAL")
-+                        sqlx::query(journal_mode_pragma)
-                             .execute(connection)
-                             .await?;
-                         Ok(())
+                             Ok(())
 diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_tests.rs
 index d9372dd..2ba47d5 100644
 --- a/codex-rs/state/src/sqlite_tests.rs
 +++ b/codex-rs/state/src/sqlite_tests.rs
-@@ -121,3 +121,70 @@ async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::R
+@@ -122,3 +122,70 @@ async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::R
          .await;
      Ok(())
  }

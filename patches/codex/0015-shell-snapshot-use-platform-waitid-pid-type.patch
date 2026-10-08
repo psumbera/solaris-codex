@@ -1,0 +1,19 @@
+Use the platform id_t for waitid when observing shell snapshot captures.
+
+Tokio returns a child PID as u32, but Solaris declares waitid's PID argument
+as a signed id_t. Cast the OS-created child PID to the libc API's native type;
+its value is already a valid process ID. Preserve WNOWAIT and process-group
+cleanup semantics. On platforms with an unsigned id_t this is unchanged.
+
+diff --git a/codex-rs/exec-server/src/shell_snapshot_process.rs b/codex-rs/exec-server/src/shell_snapshot_process.rs
+--- a/codex-rs/exec-server/src/shell_snapshot_process.rs
++++ b/codex-rs/exec-server/src/shell_snapshot_process.rs
+@@ -51,7 +51,7 @@ impl SnapshotCapture {
+                 if unsafe {
+                     libc::waitid(
+                         libc::P_PID,
+-                        pid,
++                        pid as libc::id_t,
+                         info.as_mut_ptr(),
+                         libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                     )

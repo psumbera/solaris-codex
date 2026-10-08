@@ -91,7 +91,7 @@ index 37363c8..080dae4 100644
          #[cfg(windows)]
          bind_windows_cwd_relative_deny_read_globs(&mut file_system_policy, &cwd.uri)?;
          let network_policy = NetworkSandboxPolicy::Restricted;
-@@ -208,6 +242,91 @@ impl FileSystemSandboxRunner {
+@@ -208,6 +242,94 @@ impl FileSystemSandboxRunner {
      }
  }
 
@@ -147,7 +147,10 @@ index 37363c8..080dae4 100644
 +    match request {
 +        FsHelperRequest::LoadCapabilityDiscoveries { .. }
 +        | FsHelperRequest::DiscoverCapabilityRoots(_) => unreachable!(),
-+        FsHelperRequest::Open(params) | FsHelperRequest::ReadFile(params) => {
++        FsHelperRequest::Open(params) => {
++            add_path(&params.path, FileSystemAccessMode::Read)?;
++        }
++        FsHelperRequest::ReadFile(params) => {
 +            add_path(&params.path, FileSystemAccessMode::Read)?;
 +        }
 +        FsHelperRequest::WriteFile(params) => {
@@ -254,14 +257,20 @@ diff --git a/codex-rs/exec-server/src/sandboxed_file_system.rs b/codex-rs/exec-s
 index 8583594..ca79b7e 100644
 --- a/codex-rs/exec-server/src/sandboxed_file_system.rs
 +++ b/codex-rs/exec-server/src/sandboxed_file_system.rs
-@@ -87,9 +87,14 @@ impl SandboxedFileSystem {
+@@ -27,6 +27,7 @@ use crate::WalkOutcome;
+ use crate::WriteFileOptions;
+ use crate::discover_v2::capability_locations::CapabilityLocation;
++use crate::fs_helper::FsHelperOpenParams;
+ use crate::fs_helper::FsHelperPayload;
+ use crate::fs_helper::FsHelperRequest;
+ use crate::fs_sandbox::FileSystemSandboxRunner;
+ use crate::protocol::FsCanonicalizeParams;
+@@ -87,9 +88,12 @@ impl SandboxedFileSystem {
      ) -> FileSystemResult<tokio::fs::File> {
          let sandbox = require_platform_sandbox(sandbox)?;
          validate_native_path(path)?;
-+        let request = FsHelperRequest::Open(FsReadFileParams {
++        let request = FsHelperRequest::Open(FsHelperOpenParams {
 +            path: path.clone(),
-+            follow_symlinks: None,
-+            sandbox: None,
 +        });
          let command = self
              .sandbox_runner
