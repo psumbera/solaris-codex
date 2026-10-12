@@ -91,7 +91,7 @@ index 37363c8..080dae4 100644
          #[cfg(windows)]
          bind_windows_cwd_relative_deny_read_globs(&mut file_system_policy, &cwd.uri)?;
          let network_policy = NetworkSandboxPolicy::Restricted;
-@@ -208,6 +242,94 @@ impl FileSystemSandboxRunner {
+@@ -208,6 +242,98 @@ impl FileSystemSandboxRunner {
      }
  }
 
@@ -148,7 +148,11 @@ index 37363c8..080dae4 100644
 +        FsHelperRequest::LoadCapabilityDiscoveries { .. }
 +        | FsHelperRequest::DiscoverCapabilityRoots(_) => unreachable!(),
 +        FsHelperRequest::Open(params) => {
-+            add_path(&params.path, FileSystemAccessMode::Read)?;
++            let access = match params.mode {
++                crate::protocol::FsOpenMode::Read => FileSystemAccessMode::Read,
++                crate::protocol::FsOpenMode::Replace => FileSystemAccessMode::Write,
++            };
++            add_path(&params.path, access)?;
 +        }
 +        FsHelperRequest::ReadFile(params) => {
 +            add_path(&params.path, FileSystemAccessMode::Read)?;
@@ -186,10 +190,45 @@ index 37363c8..080dae4 100644
  fn sandbox_cwd(sandbox: &FileSystemSandboxContext) -> Result<SandboxCwd, JSONRPCErrorError> {
      Ok(SandboxCwd {
          native: native_sandbox_cwd(&sandbox.cwd)?,
-@@ -964,6 +1083,38 @@ mod tests {
+@@ -964,6 +1083,73 @@ mod tests {
          );
      }
 
++    #[cfg(target_os = "solaris")]
++    #[test]
++    fn solaris_helper_open_policy_checks_mode_and_protected_metadata() {
++        use crate::protocol::FsOpenMode::{Read, Replace};
++        let temp = tempfile::tempdir().expect("temp dir");
++        let cwd = AbsolutePathBuf::from_absolute_path(temp.path()).expect("absolute cwd");
++        for (access, mode, name, allowed) in [
++            (FileSystemAccessMode::Read, Read, "file", true),
++            (FileSystemAccessMode::Read, Replace, "file", false),
++            (FileSystemAccessMode::Write, Replace, "file", true),
++            (FileSystemAccessMode::Write, Replace, ".git/config", false),
++        ] {
++            let path = cwd.join(name);
++            let original = restricted_policy(vec![path_entry(cwd.clone(), access)]);
++            let request = super::FsHelperRequest::Open(crate::fs_helper::FsHelperOpenParams {
++                path: PathUri::from_abs_path(&path),
++                mode,
++            });
++            let result = super::solaris_helper_file_system_policy(
++                &original,
++                &request,
++                cwd.as_path(),
++                &[],
++            );
++            assert_eq!(result.is_ok(), allowed, "{access:?} {mode:?} {name}");
++            if let Ok(policy) = result {
++                let expected = match mode {
++                    crate::protocol::FsOpenMode::Read => FileSystemAccessMode::Read,
++                    crate::protocol::FsOpenMode::Replace => FileSystemAccessMode::Write,
++                };
++                assert_eq!(policy.entries, vec![path_entry(path, expected)]);
++            }
++        }
++    }
++
 +    #[cfg(target_os = "solaris")]
 +    #[test]
 +    fn solaris_helper_policy_rejects_protected_metadata_under_cwd() {
@@ -265,19 +304,20 @@ index 8583594..ca79b7e 100644
  use crate::fs_helper::FsHelperRequest;
  use crate::fs_sandbox::FileSystemSandboxRunner;
  use crate::protocol::FsCanonicalizeParams;
-@@ -87,9 +88,12 @@ impl SandboxedFileSystem {
+@@ -92,9 +93,13 @@ impl SandboxedFileSystem {
      ) -> FileSystemResult<tokio::fs::File> {
          let sandbox = require_platform_sandbox(sandbox)?;
          validate_native_path(path)?;
 +        let request = FsHelperRequest::Open(FsHelperOpenParams {
 +            path: path.clone(),
++            mode,
 +        });
          let command = self
              .sandbox_runner
 -            .sandbox_command(sandbox)
 +            .sandbox_command_for_request(sandbox, &request)
              .map_err(map_sandbox_error)?;
-         crate::sandboxed_file_open::open(command, path.clone())
+         crate::sandboxed_file_open::open(command, path.clone(), mode)
              .await
 diff --git a/codex-rs/protocol/src/sandbox.rs b/codex-rs/protocol/src/sandbox.rs
 index b030463..c4871ae 100644

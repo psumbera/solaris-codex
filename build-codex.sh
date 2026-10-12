@@ -785,11 +785,22 @@ if new not in text:
     text = text.replace(old, new, 1)
 
 old = """/// Real crossterm-backed event source.
-pub struct CrosstermEventSource(pub crossterm::event::EventStream);
+pub struct CrosstermEventSource {
+    #[cfg(not(windows))]
+    events: crossterm::event::EventStream,
+    #[cfg(windows)]
+    events: super::windows_key_sequence::WindowsKeySequence<crossterm::event::EventStream>,
+}
 
 impl Default for CrosstermEventSource {
     fn default() -> Self {
-        Self(crossterm::event::EventStream::new())
+        let events = crossterm::event::EventStream::new();
+        Self {
+            #[cfg(not(windows))]
+            events,
+            #[cfg(windows)]
+            events: super::windows_key_sequence::WindowsKeySequence::new(events),
+        }
     }
 }
 
@@ -800,7 +811,7 @@ impl EventSource for CrosstermEventSource {
         #[cfg(windows)]
         let _ = super::windows_console::ensure_input_record_mode();
 
-        let result = Pin::new(&mut self.get_mut().0).poll_next(cx);
+        let result = Pin::new(&mut self.get_mut().events).poll_next(cx);
 
         // EventStream starts its blocking reader before returning Pending, so reassert the mode
         // after that transition as well.
@@ -815,12 +826,23 @@ impl EventSource for CrosstermEventSource {
 """
 new = """/// Real crossterm-backed event source.
 #[cfg(not(target_os = \"solaris\"))]
-pub struct CrosstermEventSource(pub crossterm::event::EventStream);
+pub struct CrosstermEventSource {
+    #[cfg(not(windows))]
+    events: crossterm::event::EventStream,
+    #[cfg(windows)]
+    events: super::windows_key_sequence::WindowsKeySequence<crossterm::event::EventStream>,
+}
 
 #[cfg(not(target_os = \"solaris\"))]
 impl Default for CrosstermEventSource {
     fn default() -> Self {
-        Self(crossterm::event::EventStream::new())
+        let events = crossterm::event::EventStream::new();
+        Self {
+            #[cfg(not(windows))]
+            events,
+            #[cfg(windows)]
+            events: super::windows_key_sequence::WindowsKeySequence::new(events),
+        }
     }
 }
 
@@ -832,7 +854,7 @@ impl EventSource for CrosstermEventSource {
         #[cfg(windows)]
         let _ = super::windows_console::ensure_input_record_mode();
 
-        let result = Pin::new(&mut self.get_mut().0).poll_next(cx);
+        let result = Pin::new(&mut self.get_mut().events).poll_next(cx);
 
         // EventStream starts its blocking reader before returning Pending, so reassert the mode
         // after that transition as well.
@@ -1068,12 +1090,10 @@ if "solaris input receiver dropped" not in text:
         raise SystemExit("failed to patch event_stream.rs crossterm source")
     text = text.replace(old, new, 1)
 
-old = """                    Poll::Ready(Some(Err(_))) | Poll::Ready(None) => {
-                        *state = EventBrokerState::Start;
-                        return Poll::Ready(None);
-                    }
-"""
-new = """                    Poll::Ready(Some(Err(err))) => {
+# Remove the obsolete blanket restart from previously patched trees. The
+# Solaris worker already handles transient reads; preserve upstream's EOF and
+# fatal-error termination instead of creating a fresh source indefinitely.
+old = """                    Poll::Ready(Some(Err(err))) => {
                         #[cfg(target_os = \"solaris\")]
                         tracing::warn!(error = %err, \"resetting tui event source after read error\");
                         *state = EventBrokerState::Start;
@@ -1086,10 +1106,15 @@ new = """                    Poll::Ready(Some(Err(err))) => {
                         continue;
                     }
 """
-if "resetting tui event source after read error" not in text:
-    if old not in text:
-        raise SystemExit("failed to patch event_stream.rs error handling")
+new = """                    Poll::Ready(Some(Err(_))) | Poll::Ready(None) => {
+                        *state = EventBrokerState::Start;
+                        return Poll::Ready(None);
+                    }
+"""
+if old in text:
     text = text.replace(old, new, 1)
+elif new not in text:
+    raise SystemExit("unexpected event_stream.rs error handling")
 
 old = """            Event::Key(key_event) => {
                 #[cfg(unix)]
