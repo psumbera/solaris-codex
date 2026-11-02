@@ -5,12 +5,11 @@ sidecar.
 What it does:
 - keeps WAL mode for Codex state databases on local Solaris filesystems
 - detects NFS-backed SQLite homes with statvfs(2) and uses rollback journaling
-- serializes one-shot journal migrations with an NFS-safe fcntl(2) lock
-- exclusively locks a WAL-marked database before taking a conversion snapshot
-- copies the database and WAL, but not SHM, to local /tmp for checkpointing
-- atomically replaces the NFS database after verifying rollback-journal mode
-- preserves permissions and removes obsolete WAL sidecars after conversion
-- adds a Solaris regression test with committed data present only in the WAL
+- enables upstream's exclusive staged WAL conversion on Solaris NFS
+- reuses upstream migration locking, backups and interrupted-cutover recovery
+- stages database and WAL without SHM before opening the normal pool
+- adds a Solaris regression test for enforcement without managed configuration
+- excludes two tests that require descriptor-scoped flock/directory write locks
 - keeps WAL mode unchanged on other targets
 
 Why it is needed:
@@ -19,95 +18,103 @@ Why it is needed:
 - that ordering fails on Solaris NFS with `SQLITE_IOERR_SHMMAP` / extended
   error code 5386, so conversion must complete on a local filesystem first
 
-diff --git a/codex-rs/state/Cargo.toml b/codex-rs/state/Cargo.toml
-index 0d781fb..30f8083 100644
---- a/codex-rs/state/Cargo.toml
-+++ b/codex-rs/state/Cargo.toml
-@@ -12,13 +12,15 @@ codex-protocol = { workspace = true }
- codex-utils-absolute-path = { workspace = true }
- file-id = { workspace = true }
- libsqlite3-sys = { workspace = true }
-+libc = { workspace = true }
- log = { workspace = true }
- serde = { workspace = true, features = ["derive"] }
- serde_json = { workspace = true }
- sqlx = { workspace = true }
- sqlx-macros = { workspace = true }
- sqlx-sqlite = { workspace = true }
- strum = { workspace = true, features = ["derive"] }
-+tempfile = { workspace = true }
- tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
- tracing = { workspace = true }
- tracing-subscriber = { workspace = true }
+Upstream now provides NFS migration, but its filesystem probe is Linux-only
+and existing WAL conversion otherwise requires managed opt-in. Extend the
+shared probe with statvfs(2) and enable conversion by default on Solaris.
+Migration staging honors TMPDIR; use local disk, not a large RAM-backed /tmp.
+
+Related upstream issue: https://github.com/openai/codex/issues/30957
+
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
-index 4d1c9e9..0858be5 100644
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -14,12 +14,37 @@ use crate::telemetry::DbKind;
- use codex_utils_absolute_path::AbsolutePathBuf;
- use log::LevelFilter;
- use sqlx::ConnectOptions;
-+#[cfg(target_os = "solaris")]
-+use sqlx::Connection;
- use sqlx::Error;
- use sqlx::SqlitePool;
- use sqlx::migrate::Migrator;
- use sqlx::sqlite::SqliteConnectOptions;
-+use sqlx::sqlite::SqliteJournalMode;
- use sqlx::sqlite::SqlitePoolOptions;
- use sqlx::sqlite::SqliteSynchronous;
-+#[cfg(target_os = "solaris")]
-+use std::ffi::CString;
-+#[cfg(target_os = "solaris")]
-+use std::ffi::OsString;
-+#[cfg(target_os = "solaris")]
-+use std::fs::File;
-+#[cfg(target_os = "solaris")]
-+use std::fs::OpenOptions;
-+#[cfg(target_os = "solaris")]
-+use std::io::Read;
-+#[cfg(target_os = "solaris")]
-+use std::io::Seek;
-+#[cfg(target_os = "solaris")]
-+use std::io::SeekFrom;
-+#[cfg(target_os = "solaris")]
-+use std::mem::MaybeUninit;
-+#[cfg(target_os = "solaris")]
-+use std::os::fd::AsRawFd;
-+#[cfg(target_os = "solaris")]
-+use std::os::unix::ffi::OsStrExt;
-+#[cfg(target_os = "solaris")]
-+use std::os::unix::fs::OpenOptionsExt;
- use std::path::Path;
- use std::path::PathBuf;
- use std::time::Duration;
-@@ -38,6 +63,253 @@ const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
- const STATE_DB_FILENAME: &str = "state_5.sqlite";
- const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
+@@ -213,7 +213,9 @@
+             local_logs_dir: None,
+             is_nfs: Arc::new(OnceCell::new()),
+             logs_is_nfs: Arc::new(OnceCell::new()),
+-            enforce_delete_on_nfs,
++            // Solaris NFS cannot reliably mmap SQLite's WAL shared memory.
++            // Reuse upstream's exclusive, staged conversion before pool open.
++            enforce_delete_on_nfs: enforce_delete_on_nfs || cfg!(target_os = "solaris"),
+             quick_check_manager: SqliteQuickCheckManager::new(),
+         }
+     }
+@@ -230,6 +232,7 @@
+             sqlite_home,
+             /*enforce_delete_on_nfs*/ false,
+         )
++        .enable_delete_mode_on_nfs(false)
+     }
  
-+fn sqlite_journal_mode(path: &Path) -> Result<SqliteJournalMode, Error> {
-+    #[cfg(target_os = "solaris")]
-+    if solaris_path_is_nfs(path)? {
-+        return Ok(SqliteJournalMode::Delete);
-+    }
-+
-+    #[cfg(not(target_os = "solaris"))]
-+    let _ = path;
-+    Ok(SqliteJournalMode::Wal)
-+}
+     pub fn home(&self) -> &Path {
+diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_tests.rs
+--- a/codex-rs/state/src/sqlite_tests.rs
++++ b/codex-rs/state/src/sqlite_tests.rs
+@@ -7,6 +7,14 @@
+ use sqlx::sqlite::SqliteConnectOptions;
+ use sqlx::sqlite::SqliteJournalMode;
+ use sqlx::sqlite::SqlitePoolOptions;
 +
 +#[cfg(target_os = "solaris")]
-+fn solaris_path_is_nfs(path: &Path) -> Result<bool, Error> {
-+    let filesystem_path = path.parent().unwrap_or(path);
-+    let filesystem_path = CString::new(filesystem_path.as_os_str().as_bytes()).map_err(|_| {
-+        Error::Io(std::io::Error::new(
-+            std::io::ErrorKind::InvalidInput,
-+            "SQLite path contains NUL",
-+        ))
-+    })?;
++#[test]
++fn solaris_enforces_nfs_conversion_without_managed_configuration() {
++    let home = crate::runtime::test_support::unique_temp_dir();
++    let sqlite = SqliteConfig::from_sqlite_home_with_nfs_enforcement(home.as_path().abs(), false);
++    assert!(sqlite.enforce_delete_on_nfs);
++}
+ 
+ #[tokio::test]
+ async fn configured_log_directory_is_initialized_on_use_and_retries_after_failure()
+@@ -59,6 +67,10 @@
+ 
+ #[cfg(unix)]
+ #[tokio::test]
++#[cfg_attr(
++    target_os = "solaris",
++    ignore = "Solaris fcntl cannot exclusively lock a read-only directory descriptor"
++)]
+ async fn configured_log_directory_lock_is_shared_by_reader_and_writer_config_clones()
+ -> anyhow::Result<()> {
+     let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+diff --git a/codex-rs/file-system/Cargo.toml b/codex-rs/file-system/Cargo.toml
+--- a/codex-rs/file-system/Cargo.toml
++++ b/codex-rs/file-system/Cargo.toml
+@@ -19,6 +19,9 @@
+ [target.'cfg(target_os = "linux")'.dependencies]
+ rustix = { workspace = true, features = ["fs"] }
+ 
++[target.'cfg(target_os = "solaris")'.dependencies]
++libc = { workspace = true }
++
+ [lib]
+ test = false
+ doctest = false
+diff --git a/codex-rs/file-system/src/nfs.rs b/codex-rs/file-system/src/nfs.rs
+--- a/codex-rs/file-system/src/nfs.rs
++++ b/codex-rs/file-system/src/nfs.rs
+@@ -1,4 +1,4 @@
+-//! Detects NFS on Linux; other platforms retain their existing filesystem behavior.
++//! Detects NFS on Linux and Solaris without opening a file descriptor.
+ //! Closing an extra file descriptor could release process-wide POSIX locks on its inode.
+ 
+ use std::io;
+@@ -10,7 +10,32 @@
+     Ok(rustix::fs::statfs(path)?.f_type == rustix::fs::NFS_SUPER_MAGIC)
+ }
+ 
+-#[cfg(not(target_os = "linux"))]
++#[cfg(target_os = "solaris")]
++pub fn is_nfs(path: &Path) -> io::Result<bool> {
++    use std::ffi::CString;
++    use std::mem::MaybeUninit;
++    use std::os::unix::ffi::OsStrExt;
++
++    let path = CString::new(path.as_os_str().as_bytes())
++        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))?;
 +    let mut stats = MaybeUninit::<libc::statvfs>::uninit();
-+    if unsafe { libc::statvfs(filesystem_path.as_ptr(), stats.as_mut_ptr()) } != 0 {
-+        return Err(Error::Io(std::io::Error::last_os_error()));
++    // SAFETY: path is NUL-terminated; statvfs initializes stats on success.
++    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
++        return Err(io::Error::last_os_error());
 +    }
 +    let stats = unsafe { stats.assume_init() };
 +    let end = stats
@@ -121,322 +128,21 @@ index 4d1c9e9..0858be5 100644
 +        .eq(b"nfs".iter().copied()))
 +}
 +
-+#[cfg(target_os = "solaris")]
-+fn cleanup_solaris_wal_sidecars(path: &Path) {
-+    // WAL mode relies on mmap'ing the -shm sidecar, which is unreliable for
-+    // Codex homes on Solaris NFS mounts. Older runs may have left an empty WAL
-+    // plus stale SHM file before the Solaris rollback-journal switch.
-+    let wal_path = sqlite_sidecar_path(path, "-wal");
-+
-+    let should_remove = match std::fs::metadata(&wal_path) {
-+        Ok(metadata) => metadata.len() == 0,
-+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
-+        Err(err) => {
-+            tracing::warn!(
-+                "failed to inspect SQLite WAL sidecar {} before Solaris cleanup: {err}",
-+                wal_path.display()
-+            );
-+            false
-+        }
-+    };
-+
-+    if !should_remove {
-+        return;
-+    }
-+
-+    remove_solaris_wal_sidecars(path);
-+}
-+
-+#[cfg(target_os = "solaris")]
-+fn remove_solaris_wal_sidecars(path: &Path) {
-+    for sidecar in [
-+        sqlite_sidecar_path(path, "-wal"),
-+        sqlite_sidecar_path(path, "-shm"),
-+    ] {
-+        match std::fs::remove_file(&sidecar) {
-+            Ok(()) => {}
-+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-+            Err(err) => tracing::warn!(
-+                "failed to remove stale SQLite sidecar {} before Solaris startup: {err}",
-+                sidecar.display()
-+            ),
-+        }
-+    }
-+}
-+
-+#[cfg(target_os = "solaris")]
-+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
-+    let mut sidecar = OsString::from(path.as_os_str());
-+    sidecar.push(suffix);
-+    PathBuf::from(sidecar)
-+}
-+
-+#[cfg(target_os = "solaris")]
-+async fn prepare_solaris_sqlite_for_rollback_journal(path: &Path) -> Result<(), Error> {
-+    match std::fs::metadata(path) {
-+        Ok(_) => {}
-+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-+        Err(err) => return Err(Error::Io(err)),
-+    }
-+
-+    let parent = path.parent().ok_or_else(|| {
-+        Error::Io(std::io::Error::new(
-+            std::io::ErrorKind::InvalidInput,
-+            "SQLite path has no parent directory",
-+        ))
-+    })?;
-+    let lock_path = parent.join(".codex-sqlite-journal-migration.lock");
-+    let lock_file = OpenOptions::new()
-+        .create(true)
-+        .read(true)
-+        .write(true)
-+        .mode(0o600)
-+        .open(lock_path)
-+        .map_err(Error::Io)?;
-+    lock_solaris_file(&lock_file, true).map_err(Error::Io)?;
-+
-+    if !sqlite_path_uses_wal(path)? {
-+        cleanup_solaris_wal_sidecars(path);
-+        return Ok(());
-+    }
-+
-+    let mut source_db = OpenOptions::new()
-+        .read(true)
-+        .write(true)
-+        .open(path)
-+        .map_err(Error::Io)?;
-+    lock_solaris_file(&source_db, false).map_err(|err| {
-+        Error::Io(std::io::Error::new(
-+            err.kind(),
-+            format!(
-+                "cannot convert WAL database {} while it is in use: {err}",
-+                path.display()
-+            ),
-+        ))
-+    })?;
-+    if !sqlite_file_uses_wal(&mut source_db)? {
-+        cleanup_solaris_wal_sidecars(path);
-+        return Ok(());
-+    }
-+
-+    let local_dir = tempfile::Builder::new()
-+        .prefix("codex-sqlite-rollback-")
-+        .tempdir_in("/tmp")
-+        .map_err(Error::Io)?;
-+    let filename = path.file_name().ok_or_else(|| {
-+        Error::Io(std::io::Error::new(
-+            std::io::ErrorKind::InvalidInput,
-+            "SQLite path has no file name",
-+        ))
-+    })?;
-+    let local_db_path = local_dir.path().join(filename);
-+    if solaris_path_is_nfs(&local_db_path)? {
-+        return Err(Error::Io(std::io::Error::other(
-+            "cannot convert SQLite WAL database because /tmp is NFS-backed",
-+        )));
-+    }
-+    let mut local_db = File::create(&local_db_path).map_err(Error::Io)?;
-+    source_db.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
-+    std::io::copy(&mut source_db, &mut local_db).map_err(Error::Io)?;
-+    local_db.sync_all().map_err(Error::Io)?;
-+
-+    let wal_path = sqlite_sidecar_path(path, "-wal");
-+    match File::open(&wal_path) {
-+        Ok(mut source_wal) => {
-+            let local_wal_path = sqlite_sidecar_path(&local_db_path, "-wal");
-+            let mut local_wal = File::create(local_wal_path).map_err(Error::Io)?;
-+            std::io::copy(&mut source_wal, &mut local_wal).map_err(Error::Io)?;
-+            local_wal.sync_all().map_err(Error::Io)?;
-+        }
-+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-+        Err(err) => return Err(Error::Io(err)),
-+    }
-+
-+    let options = SqliteConnectOptions::new()
-+        .filename(&local_db_path)
-+        .create_if_missing(true)
-+        .journal_mode(SqliteJournalMode::Delete)
-+        .synchronous(SqliteSynchronous::Normal)
-+        .busy_timeout(Duration::from_secs(5))
-+        .log_statements(LevelFilter::Off);
-+    let conn = options.connect().await?;
-+    conn.close().await?;
-+
-+    if sqlite_path_uses_wal(&local_db_path)? {
-+        return Err(Error::Io(std::io::Error::other(
-+            "local SQLite WAL conversion did not select rollback journaling",
-+        )));
-+    }
-+
-+    let source_permissions = source_db.metadata().map_err(Error::Io)?.permissions();
-+    let mut converted_db = File::open(&local_db_path).map_err(Error::Io)?;
-+    let mut replacement = tempfile::Builder::new()
-+        .prefix(".codex-sqlite-rollback-")
-+        .tempfile_in(parent)
-+        .map_err(Error::Io)?;
-+    std::io::copy(&mut converted_db, replacement.as_file_mut()).map_err(Error::Io)?;
-+    replacement
-+        .as_file()
-+        .set_permissions(source_permissions)
-+        .map_err(Error::Io)?;
-+    replacement.as_file().sync_all().map_err(Error::Io)?;
-+    let replacement_file = replacement
-+        .persist(path)
-+        .map_err(|err| Error::Io(err.error))?;
-+    replacement_file.sync_all().map_err(Error::Io)?;
-+
-+    remove_solaris_wal_sidecars(path);
-+    Ok(())
-+}
-+
-+#[cfg(target_os = "solaris")]
-+fn sqlite_path_uses_wal(path: &Path) -> Result<bool, Error> {
-+    let mut file = File::open(path).map_err(Error::Io)?;
-+    sqlite_file_uses_wal(&mut file)
-+}
-+
-+#[cfg(target_os = "solaris")]
-+fn sqlite_file_uses_wal(file: &mut File) -> Result<bool, Error> {
-+    const SQLITE_HEADER_LEN: usize = 20;
-+    const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
-+
-+    let mut header = [0_u8; SQLITE_HEADER_LEN];
-+    file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
-+    match file.read_exact(&mut header) {
-+        Ok(()) => {}
-+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
-+        Err(err) => return Err(Error::Io(err)),
-+    }
-+    Ok(&header[..SQLITE_MAGIC.len()] == SQLITE_MAGIC
-+        && (header[18] == 2 || header[19] == 2))
-+}
-+
-+#[cfg(target_os = "solaris")]
-+fn lock_solaris_file(file: &File, wait: bool) -> std::io::Result<()> {
-+    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
-+    lock.l_type = libc::F_WRLCK as libc::c_short;
-+    lock.l_whence = libc::SEEK_SET as libc::c_short;
-+    lock.l_start = 0;
-+    lock.l_len = 0;
-+    let command = if wait { libc::F_SETLKW } else { libc::F_SETLK };
-+
-+    loop {
-+        if unsafe { libc::fcntl(file.as_raw_fd(), command, &lock) } == 0 {
-+            return Ok(());
-+        }
-+        let err = std::io::Error::last_os_error();
-+        if err.raw_os_error() == Some(libc::EINTR) {
-+            continue;
-+        }
-+        return Err(err);
-+    }
-+}
-+
- #[derive(Clone, Copy, Eq, PartialEq)]
- enum RecoveryMode {
-     BackupAndRebuild,
-@@ -351,9 +623,20 @@ impl SqliteConfig {
-         path: &Path,
-         recover_spec: Option<RuntimeDbSpec>,
-         telemetry_override: Option<&dyn DbTelemetry>,
-     ) -> anyhow::Result<SqlitePool> {
-+        let journal_mode = sqlite_journal_mode(path)?;
-+        #[cfg(target_os = "solaris")]
-+        if journal_mode == SqliteJournalMode::Delete {
-+            prepare_solaris_sqlite_for_rollback_journal(path).await?;
-+        }
-+        let journal_mode_pragma = if journal_mode == SqliteJournalMode::Delete {
-+            "PRAGMA journal_mode = DELETE"
-+        } else {
-+            "PRAGMA journal_mode = WAL"
-+        };
-+
-         let recovery = recover_spec.map_or(RecoveryMode::Unavailable, |spec| spec.recovery);
-         let options = SqliteConnectOptions::new()
-             .filename(path)
-             .create_if_missing(true)
-             .synchronous(SqliteSynchronous::Normal)
-@@ -388,7 +671,7 @@ impl SqliteConfig {
-                                     .execute(&mut *connection)
-                                     .await?;
-                             }
--                            sqlx::query("PRAGMA journal_mode = WAL")
-+                            sqlx::query(journal_mode_pragma)
-                                 .execute(connection)
-                                 .await?;
-                             Ok(())
-diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_tests.rs
-index d9372dd..2ba47d5 100644
---- a/codex-rs/state/src/sqlite_tests.rs
-+++ b/codex-rs/state/src/sqlite_tests.rs
-@@ -122,3 +122,70 @@ async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::R
-         .await;
-     Ok(())
++#[cfg(not(any(target_os = "linux", target_os = "solaris")))]
+ pub fn is_nfs(_path: &Path) -> io::Result<bool> {
+     Ok(false)
  }
-+
-+#[cfg(target_os = "solaris")]
-+mod solaris {
-+    use super::super::prepare_solaris_sqlite_for_rollback_journal;
-+    use super::super::sqlite_path_uses_wal;
-+    use super::super::sqlite_sidecar_path;
-+    use sqlx::ConnectOptions;
-+    use sqlx::Connection;
-+    use sqlx::sqlite::SqliteConnectOptions;
-+    use sqlx::sqlite::SqliteJournalMode;
-+
-+    #[tokio::test]
-+    async fn converts_wal_snapshot_without_mapping_nfs_shm() -> anyhow::Result<()> {
-+        let test_dir = tempfile::Builder::new()
-+            .prefix("codex-sqlite-conversion-test-")
-+            .tempdir_in("/tmp")?;
-+        let source_path = test_dir.path().join("source.sqlite");
-+        let fixture_path = test_dir.path().join("fixture.sqlite");
-+
-+        let mut source = SqliteConnectOptions::new()
-+            .filename(&source_path)
-+            .create_if_missing(true)
-+            .journal_mode(SqliteJournalMode::Wal)
-+            .connect()
-+            .await?;
-+        sqlx::query("PRAGMA wal_autocheckpoint=0")
-+            .execute(&mut source)
-+            .await?;
-+        sqlx::query("CREATE TABLE test_data (value INTEGER NOT NULL)")
-+            .execute(&mut source)
-+            .await?;
-+        sqlx::query("INSERT INTO test_data (value) VALUES (42)")
-+            .execute(&mut source)
-+            .await?;
-+
-+        let source_wal = sqlite_sidecar_path(&source_path, "-wal");
-+        assert!(std::fs::metadata(&source_wal)?.len() > 0);
-+        std::fs::copy(&source_path, &fixture_path)?;
-+        std::fs::copy(
-+            &source_wal,
-+            sqlite_sidecar_path(&fixture_path, "-wal"),
-+        )?;
-+        source.close().await?;
-+
-+        assert!(sqlite_path_uses_wal(&fixture_path)?);
-+        prepare_solaris_sqlite_for_rollback_journal(&fixture_path).await?;
-+        assert!(!sqlite_path_uses_wal(&fixture_path)?);
-+        assert!(!sqlite_sidecar_path(&fixture_path, "-wal").exists());
-+        assert!(!sqlite_sidecar_path(&fixture_path, "-shm").exists());
-+
-+        let mut converted = SqliteConnectOptions::new()
-+            .filename(&fixture_path)
-+            .connect()
-+            .await?;
-+        let journal_mode: String = sqlx::query_scalar("PRAGMA journal_mode")
-+            .fetch_one(&mut converted)
-+            .await?;
-+        let value: i64 = sqlx::query_scalar("SELECT value FROM test_data")
-+            .fetch_one(&mut converted)
-+            .await?;
-+        converted.close().await?;
-+
-+        assert_eq!(journal_mode, "delete");
-+        assert_eq!(value, 42);
-+        Ok(())
-+    }
-+}
+diff --git a/codex-rs/state/src/runtime/reclamation_tests.rs b/codex-rs/state/src/runtime/reclamation_tests.rs
+--- a/codex-rs/state/src/runtime/reclamation_tests.rs
++++ b/codex-rs/state/src/runtime/reclamation_tests.rs
+@@ -5,6 +5,10 @@
+ use pretty_assertions::assert_eq;
+ 
+ #[tokio::test]
++#[cfg_attr(
++    target_os = "solaris",
++    ignore = "same-process fcntl locks do not model a separate maintenance owner on Solaris"
++)]
+ async fn reclaims_current_and_legacy_logs_with_independent_directory_locks() -> anyhow::Result<()> {
+     let directory = unique_temp_dir();
+     tokio::fs::create_dir_all(&directory).await?;

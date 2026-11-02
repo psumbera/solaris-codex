@@ -2,16 +2,17 @@ This patch is needed because Solaris stack-segment discovery and archive tool
 behavior differ from the Linux-oriented defaults in Chromium and V8.
 
 What it does:
-- includes thr_stksegment support for the Solaris V8 platform code
+- uses thr_stksegment for Solaris stack start and reserved-limit discovery
 - disables thin-archive usage in the affected Solaris compiler config path
 
 Why it is needed:
 - without it, the Solaris build either uses the wrong stack helpers or hits
   archive handling that the Solaris toolchain does not support correctly
 
---- a/v8-150.4.0/build/config/compiler/BUILD.gn
-+++ b/v8-150.4.0/build/config/compiler/BUILD.gn
-@@ -2303,17 +2303,19 @@
+diff --git a/v8-152.2.0/build/config/compiler/BUILD.gn b/v8-152.2.0/build/config/compiler/BUILD.gn
+--- a/v8-152.2.0/build/config/compiler/BUILD.gn
++++ b/v8-152.2.0/build/config/compiler/BUILD.gn
+@@ -2332,8 +2332,9 @@
  # 2. Remove the thin_archive config, so that the .a file actually contains all
  #    .o files, instead of just references to .o files in the build directoy
  config("thin_archive") {
@@ -23,7 +24,7 @@ Why it is needed:
      # The macOS and iOS linker ld64.ldd doesn't support thin archive without
      # symbol table, gcc on linux also throws the error `archive has no index`.
      # AIX does support -s option, not -S option.
-     arflags = [
+@@ -2341,7 +2342,8 @@
        "-T",
        "-s",
      ]
@@ -33,9 +34,9 @@ Why it is needed:
      # The macOS and iOS default linker ld64 does not support reading thin
      # archives.
      arflags = [
-       "-T",
---- a/v8-150.4.0/v8/src/base/platform/platform-solaris.cc
-+++ b/v8-150.4.0/v8/src/base/platform/platform-solaris.cc
+diff --git a/v8-152.2.0/v8/src/base/platform/platform-solaris.cc b/v8-152.2.0/v8/src/base/platform/platform-solaris.cc
+--- a/v8-152.2.0/v8/src/base/platform/platform-solaris.cc
++++ b/v8-152.2.0/v8/src/base/platform/platform-solaris.cc
 @@ -18,6 +18,7 @@
  #include <sys/mman.h>  // mmap()
  #include <sys/regset.h>
@@ -44,7 +45,8 @@ Why it is needed:
  #include <sys/time.h>  // gettimeofday(), timeradd()
  #include <time.h>
  #include <ucontext.h>  // walkstack(), getcontext()
-@@ -74,17 +75,9 @@
+@@ -73,20 +74,20 @@
+ 
  // static
  Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
 -  pthread_attr_t attr;
@@ -64,4 +66,14 @@ Why it is needed:
    }
 -  pthread_attr_destroy(&attr);
    return nullptr;
++}
++
++// static
++Stack::StackSlot Stack::ObtainCurrentThreadStackReservedLimit() {
++  stack_t stack;
++  if (thr_stksegment(&stack) != 0) return nullptr;
++  // Unlike sigaltstack, Solaris reports the high address in ss_sp.
++  return reinterpret_cast<uint8_t*>(stack.ss_sp) - stack.ss_size;
  }
+ 
+ }  // namespace base

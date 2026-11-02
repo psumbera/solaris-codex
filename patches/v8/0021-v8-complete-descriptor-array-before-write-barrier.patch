@@ -1,6 +1,6 @@
-diff --git a/v8-150.4.0/v8/src/heap/heap-write-barrier.cc b/v8-150.4.0/v8/src/heap/heap-write-barrier.cc
---- a/v8-150.4.0/v8/src/heap/heap-write-barrier.cc
-+++ b/v8-150.4.0/v8/src/heap/heap-write-barrier.cc
+diff --git a/v8-152.2.0/v8/src/heap/heap-write-barrier.cc b/v8-152.2.0/v8/src/heap/heap-write-barrier.cc
+--- a/v8-152.2.0/v8/src/heap/heap-write-barrier.cc
++++ b/v8-152.2.0/v8/src/heap/heap-write-barrier.cc
 @@ -7,3 +7,4 @@
 +#include "src/objects/descriptor-array.h"
  #include "src/heap/heap-layout-inl.h"

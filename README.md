@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.162.1/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.166.0/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -98,7 +98,8 @@ It retains all fixtures for inspection and does not use real credentials.
 
 Patch syntax is validated with Git before GNU patch applies any series;
 incorrect hunk lengths can otherwise silently omit changes even with zero
-fuzz. Run `python3.13 -m unittest test_patch_series.py` to check that gate.
+fuzz. Run `python3.13 -m unittest test_patch_series.py test_vendor_patches.py`
+to check that gate and the checksum-aware dependency adjustments.
 
 ## Monitoring Running Sessions
 
@@ -132,7 +133,7 @@ SQLite, it adds no database locks and works with both local and NFS-backed
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.162.1`, built from its `codex-rs/` workspace.
+  `rust-v0.166.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -153,7 +154,10 @@ patch series under `patches/codex/` before vendoring:
   Solaris `AI_CANONNAME` value that the Rust `libc` crate does not expose.
 - `0005-state-use-rollback-journal-on-solaris.patch` keeps Codex state
   databases in SQLite WAL mode on local Solaris filesystems, while using
-  rollback journals on NFS-backed homes to avoid `-shm` mmap failures.
+  rollback journals on NFS-backed homes to avoid `-shm` mmap failures. It extends
+  upstream's shared filesystem probe and enables upstream's exclusive, staged
+  WAL conversion on Solaris without requiring managed configuration. Migration
+  staging honors `TMPDIR`; point it at local disk rather than a large RAM disk.
 - `0006-arg0-tolerate-solaris-stale-temp-cleanup.patch` keeps stale arg0 temp
   cleanup best-effort when Solaris/NFS reports non-empty directory races during
   startup.

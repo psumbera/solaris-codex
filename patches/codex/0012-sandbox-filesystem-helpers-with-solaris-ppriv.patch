@@ -11,10 +11,9 @@ the sandbox. Keep general command execution on the existing approval path until
 its richer policy can be represented without weakening the sandbox.
 
 diff --git a/codex-rs/exec-server-protocol/src/protocol.rs b/codex-rs/exec-server-protocol/src/protocol.rs
-index 84b2664..ad0a55a 100644
 --- a/codex-rs/exec-server-protocol/src/protocol.rs
 +++ b/codex-rs/exec-server-protocol/src/protocol.rs
-@@ -443,6 +443,7 @@ pub enum ProcessSandboxType {
+@@ -514,6 +514,7 @@
      None,
      MacosSeatbelt,
      LinuxSeccomp,
@@ -23,10 +22,9 @@ index 84b2664..ad0a55a 100644
      WindowsMxc,
  }
 diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
-index 37363c8..080dae4 100644
 --- a/codex-rs/exec-server/src/fs_sandbox.rs
 +++ b/codex-rs/exec-server/src/fs_sandbox.rs
-@@ -11,6 +11,8 @@ use codex_protocol::permissions::FileSystemSandboxEntry;
+@@ -11,6 +11,8 @@
  use codex_protocol::permissions::FileSystemSandboxPolicy;
  use codex_protocol::permissions::FileSystemSpecialPath;
  use codex_protocol::permissions::NetworkSandboxPolicy;
@@ -35,16 +33,19 @@ index 37363c8..080dae4 100644
  use codex_sandboxing::SandboxCommand;
  use codex_sandboxing::SandboxDirectSpawnTransformRequest;
  use codex_sandboxing::SandboxExecRequest;
-@@ -86,7 +88,7 @@ impl FileSystemSandboxRunner {
+@@ -86,7 +88,7 @@
          sandbox: &FileSystemSandboxContext,
          request: FsHelperRequest,
      ) -> Result<FsHelperPayload, JSONRPCErrorError> {
 -        let command = self.sandbox_command(sandbox)?;
 +        let command = self.sandbox_command_for_request(sandbox, &request)?;
+         crate::run_integrity_checks(&command).await;
          let request_json = serde_json::to_vec(&request).map_err(json_error)?;
          run_command(command, request_json).await
-     }
-@@ -99,6 +101,23 @@ impl FileSystemSandboxRunner {
+@@ -97,9 +99,26 @@
+         skip_all,
+         fields(permission_entries = tracing::field::Empty)
+     )]
 +    #[cfg(test)]
      pub(crate) fn sandbox_command(
          &self,
@@ -68,7 +69,7 @@ index 37363c8..080dae4 100644
      ) -> Result<SandboxExecRequest, JSONRPCErrorError> {
          let cwd = sandbox_cwd(sandbox)?;
          let native_workspace_roots = sandbox
-@@ -130,6 +148,22 @@ impl FileSystemSandboxRunner {
+@@ -131,6 +150,22 @@
          // unrelated permission roots synchronously on the executor's runtime thread.
          #[cfg(not(target_os = "linux"))]
          normalize_file_system_policy_root_aliases(&mut file_system_policy)?;
@@ -91,10 +92,12 @@ index 37363c8..080dae4 100644
          #[cfg(windows)]
          bind_windows_cwd_relative_deny_read_globs(&mut file_system_policy, &cwd.uri)?;
          let network_policy = NetworkSandboxPolicy::Restricted;
-@@ -208,6 +242,98 @@ impl FileSystemSandboxRunner {
+@@ -209,6 +244,98 @@
+         request.sandbox_override = sandbox_context.sandbox_override;
+         Ok(request)
      }
- }
-
++}
++
 +#[cfg(target_os = "solaris")]
 +fn solaris_helper_file_system_policy(
 +    original: &FileSystemSandboxPolicy,
@@ -185,15 +188,13 @@ index 37363c8..080dae4 100644
 +    }
 +
 +    Ok(FileSystemSandboxPolicy::restricted(entries))
-+}
-+
+ }
+ 
  fn sandbox_cwd(sandbox: &FileSystemSandboxContext) -> Result<SandboxCwd, JSONRPCErrorError> {
-     Ok(SandboxCwd {
-         native: native_sandbox_cwd(&sandbox.cwd)?,
-@@ -964,6 +1083,73 @@ mod tests {
+@@ -976,6 +1103,73 @@
          );
      }
-
+ 
 +    #[cfg(target_os = "solaris")]
 +    #[test]
 +    fn solaris_helper_open_policy_checks_mode_and_protected_metadata() {
@@ -265,10 +266,9 @@ index 37363c8..080dae4 100644
      fn sandbox_cwd_uses_context_cwd() {
          let native_cwd = AbsolutePathBuf::from_absolute_path(std::env::temp_dir().as_path())
 diff --git a/codex-rs/exec-server/src/local_process.rs b/codex-rs/exec-server/src/local_process.rs
-index 85cbd9b..0de01f1 100644
 --- a/codex-rs/exec-server/src/local_process.rs
 +++ b/codex-rs/exec-server/src/local_process.rs
-@@ -396,6 +396,9 @@ impl LocalProcess {
+@@ -395,6 +395,9 @@
              SandboxType::None => Some(ProcessSandboxType::None),
              SandboxType::MacosSeatbelt => Some(ProcessSandboxType::MacosSeatbelt),
              SandboxType::LinuxSeccomp => Some(ProcessSandboxType::LinuxSeccomp),
@@ -279,10 +279,9 @@ index 85cbd9b..0de01f1 100644
              SandboxType::WindowsMxc => Some(ProcessSandboxType::WindowsMxc),
          };
 diff --git a/codex-rs/exec-server/src/process.rs b/codex-rs/exec-server/src/process.rs
-index 5e795fa..545fffc 100644
 --- a/codex-rs/exec-server/src/process.rs
 +++ b/codex-rs/exec-server/src/process.rs
-@@ -32,6 +32,9 @@ pub(crate) fn sandbox_type_from_protocol(
+@@ -32,6 +32,9 @@
          Some(ProcessSandboxType::None) => Some(SandboxType::None),
          Some(ProcessSandboxType::MacosSeatbelt) => Some(SandboxType::MacosSeatbelt),
          Some(ProcessSandboxType::LinuxSeccomp) => Some(SandboxType::LinuxSeccomp),
@@ -293,18 +292,17 @@ index 5e795fa..545fffc 100644
              Some(SandboxType::WindowsRestrictedToken)
          }
 diff --git a/codex-rs/exec-server/src/sandboxed_file_system.rs b/codex-rs/exec-server/src/sandboxed_file_system.rs
-index 8583594..ca79b7e 100644
 --- a/codex-rs/exec-server/src/sandboxed_file_system.rs
 +++ b/codex-rs/exec-server/src/sandboxed_file_system.rs
-@@ -27,6 +27,7 @@ use crate::WalkOutcome;
+@@ -26,6 +26,7 @@
+ use crate::WalkOutcome;
  use crate::WriteFileOptions;
  use crate::discover_v2::capability_locations::CapabilityLocation;
 +use crate::fs_helper::FsHelperOpenParams;
  use crate::fs_helper::FsHelperPayload;
  use crate::fs_helper::FsHelperRequest;
  use crate::fs_sandbox::FileSystemSandboxRunner;
- use crate::protocol::FsCanonicalizeParams;
-@@ -92,9 +93,13 @@ impl SandboxedFileSystem {
+@@ -89,9 +90,13 @@
      ) -> FileSystemResult<tokio::fs::File> {
          let sandbox = require_platform_sandbox(sandbox)?;
          validate_native_path(path)?;
@@ -317,13 +315,12 @@ index 8583594..ca79b7e 100644
 -            .sandbox_command(sandbox)
 +            .sandbox_command_for_request(sandbox, &request)
              .map_err(map_sandbox_error)?;
+         crate::run_integrity_checks(&command).await;
          crate::sandboxed_file_open::open(command, path.clone(), mode)
-             .await
 diff --git a/codex-rs/protocol/src/sandbox.rs b/codex-rs/protocol/src/sandbox.rs
-index b030463..c4871ae 100644
 --- a/codex-rs/protocol/src/sandbox.rs
 +++ b/codex-rs/protocol/src/sandbox.rs
-@@ -11,6 +11,7 @@ pub enum SandboxType {
+@@ -30,6 +30,7 @@
      None,
      MacosSeatbelt,
      LinuxSeccomp,
@@ -331,7 +328,7 @@ index b030463..c4871ae 100644
      WindowsRestrictedToken,
      WindowsMxc,
  }
-@@ -21,6 +22,7 @@ impl SandboxType {
+@@ -40,6 +41,7 @@
              Self::None => "none",
              Self::MacosSeatbelt => "seatbelt",
              Self::LinuxSeccomp => "seccomp",
@@ -340,11 +337,10 @@ index b030463..c4871ae 100644
              Self::WindowsMxc => "windows_mxc",
          }
 diff --git a/codex-rs/sandboxing/src/lib.rs b/codex-rs/sandboxing/src/lib.rs
-index 9e54454..e3061ef 100644
 --- a/codex-rs/sandboxing/src/lib.rs
 +++ b/codex-rs/sandboxing/src/lib.rs
-@@ -7,6 +7,8 @@ mod manager;
- pub mod policy_transforms;
+@@ -8,6 +8,8 @@
+ mod sandbox_integrity;
  #[cfg(target_os = "macos")]
  pub mod seatbelt;
 +#[cfg(target_os = "solaris")]
@@ -352,7 +348,7 @@ index 9e54454..e3061ef 100644
  mod spawn;
  mod terminal_queries;
  mod violation;
-@@ -95,6 +97,14 @@ impl From<SandboxTransformError> for CodexErr {
+@@ -104,6 +106,14 @@
              SandboxTransformError::WindowsSandboxPreparation(message) => {
                  CodexErr::UnsupportedOperation(message)
              }
@@ -368,10 +364,9 @@ index 9e54454..e3061ef 100644
      }
  }
 diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
-index 2bdcecf..7d6eab6 100644
 --- a/codex-rs/sandboxing/src/manager.rs
 +++ b/codex-rs/sandboxing/src/manager.rs
-@@ -13,6 +13,10 @@ use crate::resolve_windows_elevated_filesystem_overrides;
+@@ -13,6 +13,10 @@
  use crate::resolve_windows_restricted_token_filesystem_overrides;
  #[cfg(target_os = "macos")]
  use crate::seatbelt::MacosSeatbeltProfile;
@@ -382,7 +377,7 @@ index 2bdcecf..7d6eab6 100644
  #[cfg(target_os = "windows")]
  use crate::windows_sandbox_uses_elevated_backend;
  use codex_network_proxy::ManagedNetworkSandboxContext;
-@@ -205,6 +209,10 @@ pub enum SandboxTransformError {
+@@ -208,6 +212,10 @@
      SeatbeltUnavailable,
      #[cfg(target_os = "windows")]
      WindowsSandboxPreparation(String),
@@ -391,12 +386,13 @@ index 2bdcecf..7d6eab6 100644
 +    #[cfg(not(target_os = "solaris"))]
 +    SolarisSandboxUnavailable,
  }
-
+ 
  impl std::fmt::Display for SandboxTransformError {
-@@ -241,6 +249,17 @@ impl std::fmt::Display for SandboxTransformError {
+@@ -243,6 +251,17 @@
+             #[cfg(target_os = "windows")]
              Self::WindowsSandboxPreparation(err) => {
                  write!(f, "failed to prepare windows sandbox wrapper: {err}")
-             }
++            }
 +            #[cfg(target_os = "solaris")]
 +            Self::SolarisSandboxPreparation(err) => {
 +                write!(f, "failed to prepare Solaris sandbox wrapper: {err}")
@@ -407,11 +403,10 @@ index 2bdcecf..7d6eab6 100644
 +                    f,
 +                    "Solaris extended privilege sandbox is only available on Solaris"
 +                )
-+            }
+             }
          }
      }
- }
-@@ -261,6 +280,10 @@ impl std::error::Error for SandboxTransformError {
+@@ -264,6 +283,10 @@
              Self::SeatbeltUnavailable => None,
              #[cfg(target_os = "windows")]
              Self::WindowsSandboxPreparation(_) => None,
@@ -422,16 +417,16 @@ index 2bdcecf..7d6eab6 100644
          }
      }
  }
-@@ -272,6 +295,8 @@ pub struct SandboxManager {
+@@ -275,6 +298,8 @@
      seatbelt_profile: MacosSeatbeltProfile,
      #[cfg(target_os = "macos")]
      allowed_symlinked_codex_home: Option<AbsolutePathBuf>,
 +    #[cfg(target_os = "solaris")]
 +    enable_solaris_sandbox: bool,
  }
-
+ 
  impl SandboxManager {
-@@ -287,6 +312,8 @@ impl SandboxManager {
+@@ -290,6 +315,8 @@
              seatbelt_profile: MacosSeatbeltProfile::FileSystemHelper,
              #[cfg(target_os = "macos")]
              allowed_symlinked_codex_home: None,
@@ -439,19 +434,19 @@ index 2bdcecf..7d6eab6 100644
 +            enable_solaris_sandbox: true,
          }
      }
-
-@@ -323,6 +350,10 @@ impl SandboxManager {
+ 
+@@ -325,6 +352,10 @@
+         }
          if cfg!(windows) && windows_sandbox_type == SandboxType::WindowsMxc {
              return SandboxType::WindowsMxc;
-         }
++        }
 +        #[cfg(target_os = "solaris")]
 +        if self.enable_solaris_sandbox {
 +            return SandboxType::SolarisExtendedPrivileges;
-+        }
+         }
          get_platform_sandbox(windows_sandbox_type != SandboxType::None).unwrap_or(SandboxType::None)
      }
-
-@@ -523,6 +554,24 @@ impl SandboxManager {
+@@ -526,6 +557,24 @@
                      Some(pending),
                  )
              }
@@ -477,8 +472,6 @@ index 2bdcecf..7d6eab6 100644
              SandboxType::WindowsRestrictedToken => {
                  if enforce_managed_network && windows_sandbox_level != WindowsSandboxLevel::Elevated
 diff --git a/codex-rs/sandboxing/src/solaris.rs b/codex-rs/sandboxing/src/solaris.rs
-new file mode 100644
-index 0000000..0ff23e7
 --- /dev/null
 +++ b/codex-rs/sandboxing/src/solaris.rs
 @@ -0,0 +1,154 @@
@@ -637,10 +630,9 @@ index 0000000..0ff23e7
 +    }
 +}
 diff --git a/codex-rs/sandboxing/src/violation.rs b/codex-rs/sandboxing/src/violation.rs
-index 0d00a0f..43e50c3 100644
 --- a/codex-rs/sandboxing/src/violation.rs
 +++ b/codex-rs/sandboxing/src/violation.rs
-@@ -49,6 +49,7 @@ pub enum SandboxViolationBackend {
+@@ -49,6 +49,7 @@
      LinuxSandbox,
      ManagedNetworkProxy,
      Seatbelt,
@@ -648,7 +640,7 @@ index 0d00a0f..43e50c3 100644
      WindowsSandbox,
      WindowsMxc,
  }
-@@ -59,6 +60,7 @@ impl SandboxViolationBackend {
+@@ -59,6 +60,7 @@
              Self::LinuxSandbox => "linux_sandbox",
              Self::ManagedNetworkProxy => "managed_network_proxy",
              Self::Seatbelt => "seatbelt",
@@ -656,7 +648,7 @@ index 0d00a0f..43e50c3 100644
              Self::WindowsSandbox => "windows_sandbox",
              Self::WindowsMxc => "windows_mxc",
          }
-@@ -144,6 +146,9 @@ fn classify_filesystem_sandbox_violation(
+@@ -144,6 +146,9 @@
          SandboxType::None => return None,
          SandboxType::MacosSeatbelt => SandboxViolationBackend::Seatbelt,
          SandboxType::LinuxSeccomp => SandboxViolationBackend::LinuxSandbox,

@@ -16,14 +16,17 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 # understandable without the chat history that produced the Solaris fixes.
 
 patch_vendored_nix_termios() {
-  local nix_root=${CODEX_VENDOR_DIR}/nix-0.28.0
-  local termios_rs=${nix_root}/src/sys/termios.rs
-  local checksum_json=${nix_root}/.cargo-checksum.json
+  local nix_root termios_rs checksum_json
+  local found=0
+  for nix_root in "${CODEX_VENDOR_DIR}"/nix*; do
+    termios_rs=${nix_root}/src/sys/termios.rs
+    [[ -f "${termios_rs}" ]] || continue
+    found=1
+    checksum_json=${nix_root}/.cargo-checksum.json
 
-  [[ -f "${termios_rs}" ]] || die "missing vendored nix termios source: ${termios_rs}"
-  [[ -f "${checksum_json}" ]] || die "missing vendored nix checksum: ${checksum_json}"
+    [[ -f "${checksum_json}" ]] || die "missing vendored nix checksum: ${checksum_json}"
 
-  python3 - "${termios_rs}" "${checksum_json}" <<'PY'
+    python3 - "${termios_rs}" "${checksum_json}" <<'PY'
 from pathlib import Path
 import hashlib
 import json
@@ -46,7 +49,7 @@ for old, new in replacements:
     if old in text:
         text = text.replace(old, new, 1)
         changed = True
-    elif new not in text:
+    elif new not in text and old.replace("solarish", 'target_os = "illumos"') not in text:
         raise SystemExit(f"failed to patch nix termios cfg block: {old!r}")
 
 if changed:
@@ -55,7 +58,61 @@ if changed:
 digest = hashlib.sha256(termios_rs.read_bytes()).hexdigest()
 data = json.loads(checksum_json.read_text())
 data["files"]["src/sys/termios.rs"] = digest
-checksum_json.write_text(json.dumps(data, separators=(",", ":")))
+serialized = json.dumps(data, separators=(",", ":"))
+if checksum_json.read_text() != serialized:
+    checksum_json.write_text(serialized)
+PY
+  done
+  [[ ${found} == 1 ]] || die "missing vendored nix termios sources"
+}
+
+patch_vendored_mxc() {
+  local mxc_root=${CODEX_VENDOR_DIR}/mxc-sdk
+  [[ -f "${mxc_root}/.cargo-checksum.json" ]] || die "missing vendored mxc-sdk"
+
+  python3 - "${mxc_root}" <<'PY'
+from pathlib import Path
+import hashlib
+import json
+import sys
+
+root = Path(sys.argv[1])
+checksums = root / ".cargo-checksum.json"
+data = json.loads(checksums.read_text())
+replacements = {
+    "src/core/mxc_engine/dispatch.rs": [(
+        "    crate::mxc_engine::run::log_policy_hash(request, logger);",
+        '    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]\n'
+        "    crate::mxc_engine::run::log_policy_hash(request, logger);",
+        2,
+    )],
+    "src/core/mxc_common/telemetry/correlation_state.rs": [(
+        '#[cfg(unix)]\nfn try_lock_file(file: &fs::File) -> bool {',
+        '#[cfg(target_os = "solaris")]\n'
+        'fn try_lock_file(file: &fs::File) -> bool {\n'
+        '    // Rust uses fcntl on Solaris, where libc does not expose flock.\n'
+        '    file.try_lock().is_ok()\n'
+        '}\n\n'
+        '#[cfg(all(unix, not(target_os = "solaris")))]\n'
+        'fn try_lock_file(file: &fs::File) -> bool {',
+        1,
+    )],
+}
+for name, changes in replacements.items():
+    path = root / name
+    text = path.read_text()
+    for old, new, count in changes:
+        if text.count(new) == count:
+            continue
+        if text.count(old) != count:
+            raise SystemExit(f"failed to patch mxc-sdk: {name}")
+        text = text.replace(old, new)
+    if text != path.read_text():
+        path.write_text(text)
+    data["files"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
+serialized = json.dumps(data, separators=(",", ":"))
+if checksums.read_text() != serialized:
+    checksums.write_text(serialized)
 PY
 }
 
@@ -666,6 +723,16 @@ tui_rs.write_text(text)
 alternate_screen_rs = Path(sys.argv[3])
 text = alternate_screen_rs.read_text()
 
+if "use super::tmux::MouseCapture;" not in text:
+    marker = "use super::tmux;\n"
+    if marker not in text:
+        raise SystemExit("failed to patch alternate_screen.rs mouse policy import")
+    text = text.replace(
+        marker,
+        marker + '#[cfg(target_os = "solaris")]\nuse super::tmux::MouseCapture;\n',
+        1,
+    )
+
 old = """        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer);
         self.keyboard_active.store(
             !cfg!(windows) && !keyboard_modes::keyboard_enhancement_disabled(),
@@ -1214,6 +1281,7 @@ vendor_rust_sources "${CODEX_SRC_DIR}" "${CODEX_VENDOR_DIR}" "" unlocked
 # These stay scripted because each change must also refresh the vendored
 # crate checksum metadata in .cargo-checksum.json.
 patch_vendored_nix_termios
+patch_vendored_mxc
 patch_vendored_tree_sitter_endian
 patch_vendored_fslock
 patch_vendored_onig_sys_alloca

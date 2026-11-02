@@ -43,6 +43,11 @@ new = """  let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();\n\n  // Sol
 
 if 'Solaris/Illumos bindgen works with the GN-generated preprocessor defines' not in text:
     if old not in text:
+        old = old.replace(
+            "Clang 19+ libclang via LIBCLANG_PATH)",
+            "Clang 21.1+ libclang via\n  // LIBCLANG_PATH)",
+        )
+    if old not in text:
         raise SystemExit("failed to patch build.rs bindgen handling for Solaris")
     text = text.replace(old, new, 1)
     changed = True
@@ -160,9 +165,13 @@ if 'arg.startswith("-Z")' not in text:
 
 if 'env.setdefault("RUSTC_BOOTSTRAP", "1")' not in text:
     marker = '  env = os.environ.copy() | rustenv\n'
+    bootstrap = '  env.setdefault("RUSTC_BOOTSTRAP", "1")\n'
+    if marker not in text:
+        marker = '  PrepareRustEnvForExecution(rustenv)\n'
+        bootstrap = '  rustenv.setdefault("RUSTC_BOOTSTRAP", "1")\n'
     if marker not in text:
         raise SystemExit("failed to patch rustc_wrapper.py env marker")
-    text = text.replace(marker, marker + '  env.setdefault("RUSTC_BOOTSTRAP", "1")\n', 1)
+    text = text.replace(marker, marker + bootstrap, 1)
 
 if 'if not os.path.exists(args.depfile):' not in text:
     marker = '\n  final_depfile_lines = []\n'

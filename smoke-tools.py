@@ -131,7 +131,14 @@ def run_case(args, mode):
                 if index == 1:
                     if use_v8:
                         namespace, tool = next((ns, t) for ns, t in available if t.get("name") == "exec")
-                        payload = "text('V8_OK_' + (6 * 7));"
+                        payload = (
+                            "text('V8_OK_' + (6 * 7));"
+                            "let overflow = false;"
+                            "try { (function recurse() { return recurse(); })(); }"
+                            "catch (error) { overflow = error instanceof RangeError; }"
+                            "if (!overflow) throw new Error('missing stack overflow guard');"
+                            "text('V8_STACK_OK');"
+                        )
                         item = dict(type="custom_tool_call", call_id="smoke-call", name="exec", input=payload)
                     else:
                         namespace, tool = next((ns, t) for ns, t in available if t.get("name") == "apply_patch")
@@ -151,6 +158,8 @@ def run_case(args, mode):
                     expected = "V8_OK_42" if use_v8 else "SPARC_TOOL_OK"
                     outputs = [item for item in body.get("input", []) if item.get("type") in {"function_call_output", "custom_tool_call_output"}]
                     assert expected in json.dumps(outputs), outputs
+                    if use_v8:
+                        assert "V8_STACK_OK" in json.dumps(outputs), outputs
                     namespace = None
                     item = dict(type="message", role="assistant", id="smoke-answer", content=[dict(type="output_text", text="SMOKE_COMPLETE")])
                 if namespace:

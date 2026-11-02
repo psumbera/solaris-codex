@@ -10,9 +10,10 @@ Disable daemon auto-start by default on Solaris so an ordinary `codex` launch
 continues to use its embedded app server. Users can still explicitly enable
 the feature when running a complete package.
 
+diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
-@@ -957,7 +957,7 @@ pub const FEATURES: &[FeatureSpec] = &[
+@@ -1099,7 +1099,7 @@
          id: Feature::DaemonAutoStart,
          key: "daemon_auto_start",
          stage: Stage::Stable,
@@ -20,19 +21,20 @@ the feature when running a complete package.
 +        default_enabled: !cfg!(target_os = "solaris"),
      },
      FeatureSpec {
-         id: Feature::TranscriptV2,
+         id: Feature::TuiMultiBackend,
+diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
 --- a/codex-rs/features/src/tests.rs
 +++ b/codex-rs/features/src/tests.rs
-@@ -27,6 +27,12 @@ fn under_development_features_are_disabled_by_default() {
+@@ -63,6 +63,12 @@
+             );
+         }
      }
- }
- 
++}
++
 +#[cfg(target_os = "solaris")]
 +#[test]
 +fn daemon_auto_start_is_disabled_by_default_on_solaris() {
 +    assert!(!Features::with_defaults().enabled(Feature::DaemonAutoStart));
-+}
-+
+ }
+ 
  #[test]
- fn tool_registry_config_is_not_a_feature_toggle() {
-     let features: FeaturesToml = toml::from_str(

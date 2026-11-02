@@ -4,6 +4,7 @@ flock(2), but Rust libc does not expose that interface on Solaris.
 What it does:
 - keeps the existing flock-based lock path on other Unix targets
 - uses nonblocking fcntl(F_SETLK) write locks for Solaris daemon lock files
+- releases explicit PID-probe locks with F_SETLK/F_UNLCK, including cancellation
 - compile-gates an unreachable flock branch after Solaris selects the shared
   installer directory-lock fallback
 - preserves the same busy-vs-error behavior for pid and operation locks
@@ -15,12 +16,12 @@ Why it is needed:
 diff --git a/codex-rs/app-server-daemon/src/install_lock.rs b/codex-rs/app-server-daemon/src/install_lock.rs
 --- a/codex-rs/app-server-daemon/src/install_lock.rs
 +++ b/codex-rs/app-server-daemon/src/install_lock.rs
-@@ -109,7 +109,12 @@ pub(crate) async fn acquire_install_lock(root: &Path) -> Result<InstallLock> {
+@@ -109,7 +109,12 @@
                  let result = if use_lockf {
                      unsafe { libc::lockf(file.as_raw_fd(), libc::F_TLOCK, 0) }
                  } else {
-+                    #[cfg(not(target_os = "solaris"))]
 -                    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) }
++                    #[cfg(not(target_os = "solaris"))]
 +                    unsafe {
 +                        libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB)
 +                    }
@@ -29,12 +30,10 @@ diff --git a/codex-rs/app-server-daemon/src/install_lock.rs b/codex-rs/app-serve
                  };
                  if result != 0 {
                      return Err(std::io::Error::last_os_error());
-
 diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server-daemon/src/backend/pid.rs
-index b525e61..68c85dc 100644
 --- a/codex-rs/app-server-daemon/src/backend/pid.rs
 +++ b/codex-rs/app-server-daemon/src/backend/pid.rs
-@@ -572,7 +572,7 @@ enum EmptyPidReservation {
+@@ -665,7 +665,7 @@
      Record(PidRecord),
  }
  
@@ -43,10 +42,12 @@ index b525e61..68c85dc 100644
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -588,6 +588,35 @@ fn try_lock_file(file: &fs::File) -> Result<bool> {
+@@ -679,6 +679,35 @@
+         return Ok(false);
+     }
      Err(err).context("failed to lock pid reservation")
- }
- 
++}
++
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;
@@ -74,16 +75,64 @@ index b525e61..68c85dc 100644
 +        }
 +        _ => Err(err),
 +    }
+ }
+ 
+ #[cfg(not(any(unix, windows)))]
+@@ -714,14 +743,9 @@
+     }
+     #[cfg(unix)]
+     {
+-        use std::os::fd::AsRawFd;
+-
+         // A concurrent fork can inherit this descriptor before it closes. Release the
+         // probe's lock explicitly so the child cannot look like a live reservation.
+-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) } != 0 {
+-            return Err(std::io::Error::last_os_error())
+-                .context("failed to unlock pid reservation probe");
+-        }
++        unlock_file(&file).context("failed to unlock pid reservation probe")?;
+     }
+     Ok(false)
+ }
+@@ -757,14 +781,30 @@
+ struct EmptyPidProbeLock(fs::File);
+ 
+ #[cfg(unix)]
++fn unlock_file(file: &fs::File) -> std::io::Result<()> {
++    use std::os::fd::AsRawFd;
++
++    #[cfg(not(target_os = "solaris"))]
++    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
++    #[cfg(target_os = "solaris")]
++    let result = {
++        let mut lock: libc::flock = unsafe { std::mem::zeroed() };
++        lock.l_type = libc::F_UNLCK as libc::c_short;
++        lock.l_whence = libc::SEEK_SET as libc::c_short;
++        unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &lock) }
++    };
++    if result != 0 {
++        return Err(std::io::Error::last_os_error());
++    }
++    Ok(())
 +}
 +
- #[cfg(not(any(unix, windows)))]
- fn try_lock_file(_file: &fs::File) -> Result<bool> {
-     bail!("pid-managed app-server startup is unsupported on this platform")
++#[cfg(unix)]
+ impl Drop for EmptyPidProbeLock {
+     fn drop(&mut self) {
+-        use std::os::fd::AsRawFd;
+-
+         // Closing alone leaves the lock held by any concurrent fork. Release it
+         // on every exit, including errors and cancellation while inspecting the PID.
+-        if unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) } != 0 {
+-            let error = std::io::Error::last_os_error();
++        if let Err(error) = unlock_file(&self.0) {
+             tracing::warn!(%error, "failed to unlock empty pid reservation probe");
+         }
+     }
 diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
-index 5870075..95ff316 100644
 --- a/codex-rs/app-server-daemon/src/lib.rs
 +++ b/codex-rs/app-server-daemon/src/lib.rs
-@@ -1041,7 +1041,7 @@ fn restart_decision(
+@@ -1237,7 +1237,7 @@
      }
  }
  
@@ -92,10 +141,12 @@ index 5870075..95ff316 100644
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -1057,6 +1057,35 @@ fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
+@@ -1251,6 +1251,35 @@
+         return Ok(false);
+     }
      Err(err).context("failed to lock daemon operation")
- }
- 
++}
++
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;
@@ -123,8 +174,6 @@ index 5870075..95ff316 100644
 +        }
 +        _ => Err(err),
 +    }
-+}
-+
+ }
+ 
  #[cfg(not(any(unix, windows)))]
- fn try_lock_file(_file: &tokio::fs::File) -> Result<bool> {
-     Ok(true)

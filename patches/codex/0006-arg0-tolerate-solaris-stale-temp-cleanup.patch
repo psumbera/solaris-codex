@@ -5,63 +5,34 @@ best-effort, so this should not warn the user or interrupt startup.
 What it does:
 - keeps the arg0 janitor best-effort when Solaris reports EEXIST or
   directory-not-empty during stale temp-dir removal
-- retries a plain rmdir after recursive cleanup makes partial progress
+- preserves upstream's locked rename and close-before-delete NFS cleanup
 - ignores the same-process held-lock unit test on Solaris because fcntl locks are
   process-scoped there and do not model a separate live Codex process
 
 diff --git a/codex-rs/arg0/src/lib.rs b/codex-rs/arg0/src/lib.rs
-index 1c28f81..501a172 100644
 --- a/codex-rs/arg0/src/lib.rs
 +++ b/codex-rs/arg0/src/lib.rs
-@@ -491,17 +491,41 @@ fn janitor_cleanup(temp_root: &Path) -> std::io::Result<()> {
-             continue;
-         };
- 
--        match std::fs::remove_dir_all(&path) {
--            Ok(()) => {}
--            // Expected TOCTOU race: directory can disappear after read_dir/lock checks.
--            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
--            Err(err) => return Err(err),
--        }
-+        remove_stale_arg0_dir(&path)?;
+@@ -506,6 +506,19 @@
+             Ok(()) => {}
+             // Expected TOCTOU race: directory can disappear after read_dir/lock checks.
+             Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
++            // The retired directory is no longer published. NFS can still
++            // report a transient non-empty/busy result after best-effort cleanup.
++            Err(err)
++                if cfg!(target_os = "solaris")
++                    && matches!(
++                        err.kind(),
++                        std::io::ErrorKind::AlreadyExists
++                            | std::io::ErrorKind::DirectoryNotEmpty
++                            | std::io::ErrorKind::ResourceBusy
++                    ) =>
++            {
++                continue;
++            }
+             Err(err) => return Err(err),
+         }
      }
- 
-     Ok(())
- }
- 
-+fn remove_stale_arg0_dir(path: &Path) -> std::io::Result<()> {
-+    match std::fs::remove_dir_all(path) {
-+        Ok(()) => Ok(()),
-+        // Expected TOCTOU race: directory can disappear after read_dir/lock checks.
-+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-+        Err(err) if is_solaris_stale_arg0_cleanup_race(&err) => match std::fs::remove_dir(path) {
-+            Ok(()) => Ok(()),
-+            Err(remove_err) if remove_err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-+            // Solaris can report EEXIST or EBUSY for non-empty directories. If
-+            // the recursive cleanup already made progress but the final rmdir
-+            // still reports the directory as non-empty or busy, leave it for a
-+            // later janitor pass instead of warning during startup.
-+            Err(remove_err) if is_solaris_stale_arg0_cleanup_race(&remove_err) => Ok(()),
-+            Err(remove_err) => Err(remove_err),
-+        },
-+        Err(err) => Err(err),
-+    }
-+}
-+
-+fn is_solaris_stale_arg0_cleanup_race(err: &std::io::Error) -> bool {
-+    cfg!(target_os = "solaris")
-+        && matches!(
-+            err.kind(),
-+            std::io::ErrorKind::AlreadyExists
-+                | std::io::ErrorKind::DirectoryNotEmpty
-+                | std::io::ErrorKind::ResourceBusy
-+        )
-+}
-+
- fn try_lock_dir(dir: &Path) -> std::io::Result<Option<File>> {
-     let lock_path = dir.join(LOCK_FILENAME);
-     let lock_file = match File::options().read(true).write(true).open(&lock_path) {
-@@ -723,6 +747,10 @@ mod tests {
+@@ -819,6 +832,10 @@
      }
  
      #[test]

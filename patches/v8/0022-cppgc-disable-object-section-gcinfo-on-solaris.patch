@@ -1,0 +1,18 @@
+Subject: [PATCH] cppgc: keep table-based GC metadata on Solaris
+
+The Solaris compatibility build sets is_linux for shared build rules. Do not
+let that enable the new Linux/macOS object-section GCInfo implementation:
+GCC reports section type conflicts for its local and COMDAT instantiations.
+Keep the existing GCInfo table fallback; garbage collection stays enabled.
+
+--- a/v8-152.2.0/v8/gni/v8.gni
++++ b/v8-152.2.0/v8/gni/v8.gni
+@@ -237,7 +237,7 @@
+   cppgc_enable_pointer_compression = false
+ 
+   cppgc_enable_object_section_gcinfo =
+-      (is_linux || is_mac) && !is_component_build
++      (is_linux || is_mac) && !is_component_build && target_os != "solaris"
+ 
+   # Enable support for larger cages, up to 16GB.
+   # iOS cannot mmap above 8GB, so use the smaller cage.
