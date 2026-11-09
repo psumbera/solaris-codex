@@ -2,7 +2,7 @@ Codex 0.147 moved outbound HTTP traffic to a shared route-aware client. Its
 RespectSystemProxy policy explicitly resolves environment proxies on Solaris
 and attaches NO_PROXY/no_proxy to the selected proxy, avoiding reqwest's
 system proxy autodetection for those requests. However, that policy is an
-under-development feature and remains disabled by default upstream.
+experimental feature and remains disabled by default upstream.
 
 Keep the upstream default on other platforms, but enable the shared policy by
 default on Solaris. This replaces the older exec-server-only workaround and
@@ -15,15 +15,23 @@ https://github.com/openai/codex/issues/4242
 diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
-@@ -1315,7 +1315,11 @@ const FEATURES: &[FeatureSpec] = &[
+@@ -1577,11 +1577,15 @@
          id: Feature::RespectSystemProxy,
          key: "respect_system_proxy",
--        stage: Stage::UnderDevelopment,
+-        stage: Stage::Experimental {
+-            name: "System proxy",
+-            menu_description: "Use macOS or Windows system proxy settings for Codex requests.",
+-            announcement: "",
+-        },
 -        default_enabled: false,
 +        stage: if cfg!(target_os = "solaris") {
 +            Stage::Stable
 +        } else {
-+            Stage::UnderDevelopment
++            Stage::Experimental {
++                name: "System proxy",
++                menu_description: "Use macOS or Windows system proxy settings for Codex requests.",
++                announcement: "",
++            }
 +        },
 +        default_enabled: cfg!(target_os = "solaris"),
      },

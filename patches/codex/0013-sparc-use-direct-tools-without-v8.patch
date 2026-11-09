@@ -5,6 +5,10 @@ The standalone SPARC distribution builds codex-cli only. Do not launch a
 code-mode host or select JavaScript orchestration, even when requested by
 configuration or model metadata. All other architectures keep upstream behavior.
 
+Test expectations reflect the SPARC feature gate, and a dedicated regression
+checks that explicitly enabled code-mode flags remain disabled. The generic
+unstable-feature warning test uses a feature available on every architecture.
+
 diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
@@ -58,3 +62,76 @@ diff --git a/codex-rs/core/src/tools/mod.rs b/codex-rs/core/src/tools/mod.rs
      model_info.tool_mode.unwrap_or_else(|| {
          if turn_context.config.features.enabled(Feature::CodeModeOnly) {
              ToolMode::CodeModeOnly
+diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
+--- a/codex-rs/features/src/tests.rs
++++ b/codex-rs/features/src/tests.rs
+@@ -183,8 +183,29 @@
+     features.enable(Feature::CodeModeOnly);
+     features.normalize_dependencies();
+ 
+-    assert_eq!(features.enabled(Feature::CodeModeOnly), true);
+-    assert_eq!(features.enabled(Feature::CodeMode), true);
++    let supported = !cfg!(all(target_os = "solaris", target_arch = "sparc64"));
++    assert_eq!(features.enabled(Feature::CodeModeOnly), supported);
++    assert_eq!(features.enabled(Feature::CodeMode), supported);
++}
++
++#[cfg(all(target_os = "solaris", target_arch = "sparc64"))]
++#[test]
++fn solaris_sparc_keeps_all_code_mode_flags_disabled() {
++    let mut features = Features::with_defaults();
++    let flags = [
++        Feature::CodeMode,
++        Feature::CodeModeOnly,
++        Feature::CodeModeHost,
++        Feature::CodeModePrewarm,
++        Feature::CodeModeInterrupt,
++    ];
++    for flag in flags {
++        features.enable(flag);
++    }
++    features.normalize_dependencies();
++    for flag in flags {
++        assert!(!features.enabled(flag), "{flag:?} must stay disabled");
++    }
+ }
+ 
+ #[test]
+@@ -608,8 +629,9 @@
+     );
+ 
+     assert_eq!(features.enabled(Feature::Plugins), true);
+-    assert_eq!(features.enabled(Feature::CodeModeOnly), true);
+-    assert_eq!(features.enabled(Feature::CodeMode), true);
++    let supported = !cfg!(all(target_os = "solaris", target_arch = "sparc64"));
++    assert_eq!(features.enabled(Feature::CodeModeOnly), supported);
++    assert_eq!(features.enabled(Feature::CodeMode), supported);
+     assert_eq!(features.enabled(Feature::ApplyPatchFreeform), false);
+     assert_eq!(features.enabled(Feature::WebSearchRequest), false);
+ }
+@@ -935,14 +957,14 @@
+     let configured_features: Table = toml::from_str(
+         r#"
+ multi_agent_v2 = { enabled = true, tool_namespace = "agents" }
+-code_mode = true
++apply_patch_streaming_events = true
+ "#,
+     )
+     .expect("features table should deserialize");
+ 
+     let mut features = Features::with_defaults();
+     features.enable(Feature::MultiAgentV2);
+-    features.enable(Feature::CodeMode);
++    features.enable(Feature::ApplyPatchStreamingEvents);
+ 
+     let warning = unstable_features_warning_event(
+         Some(&configured_features),
+@@ -956,7 +978,7 @@
+         panic!("expected warning event");
+     };
+     assert_eq!(
+-        "Under-development features enabled: code_mode. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /tmp/config.toml.".to_string(),
++        "Under-development features enabled: apply_patch_streaming_events. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /tmp/config.toml.".to_string(),
+         message
+     );
+ }

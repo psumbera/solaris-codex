@@ -33,14 +33,14 @@ class VendorPatchTests(unittest.TestCase):
         }))
         return root
 
-    def run_patch(self, name):
+    def run_patch(self, name, **environment):
         script = (ROOT / "build-codex.sh").read_text()
         function = (script.split(name + "() {", 1)[1]
                     .split("\npatch_", 1)[0].rsplit("\n}", 1)[0])
         return subprocess.run(
-            ["bash", "-c", "set -e\ndie() { exit 1; }\n" + name +
+            ["bash", "-c", "set -e\ndie() { exit 1; }\nlog() { :; }\n" + name +
              "() {" + function + "\n}\n" + name],
-            env=dict(os.environ, CODEX_VENDOR_DIR=str(self.vendor)),
+            env=dict(os.environ, CODEX_VENDOR_DIR=str(self.vendor), **environment),
             capture_output=True, text=True, timeout=30,
         )
 
@@ -50,11 +50,11 @@ class VendorPatchTests(unittest.TestCase):
         for name, digest in data["files"].items():
             self.assertEqual(digest, hashlib.sha256((root / name).read_bytes()).hexdigest())
 
-    def assert_idempotent(self, name):
-        first = self.run_patch(name)
+    def assert_idempotent(self, name, **environment):
+        first = self.run_patch(name, **environment)
         self.assertEqual(first.returncode, 0, first.stderr)
         before = {p: p.stat().st_mtime_ns for p in self.vendor.rglob("*") if p.is_file()}
-        second = self.run_patch(name)
+        second = self.run_patch(name, **environment)
         self.assertEqual(second.returncode, 0, second.stderr)
         after = {p: p.stat().st_mtime_ns for p in self.vendor.rglob("*") if p.is_file()}
         self.assertEqual(before, after, "unchanged rewrites must not invalidate Cargo caches")
@@ -89,6 +89,49 @@ class VendorPatchTests(unittest.TestCase):
         self.assertIn("file.try_lock().is_ok()", (
             root / "src/core/mxc_common/telemetry/correlation_state.rs").read_text())
         self.check_checksums(root)
+
+    def mio(self, waker=None):
+        for name in ("event_ports.rs", "selector.rs"):
+            if name != waker:
+                (self.vendor / "mio/src/sys/unix/waker" / name).unlink(missing_ok=True)
+        files = {name: "fixture\n" for name in (
+            "src/poll.rs", "src/sys/unix/mod.rs",
+            "src/sys/unix/selector/event_ports.rs",
+        )}
+        if waker:
+            files["src/sys/unix/waker/" + waker] = "selector-backed waker\n"
+        root = self.crate("mio", files)
+        digest = hashlib.sha256()
+        for patch in sorted((ROOT / "patches/mio").glob("*.patch")):
+            digest.update(patch.name.encode())
+            digest.update(b"\0")
+            digest.update(patch.read_bytes())
+        (root / ".solaris-mio-patch-series.sha256").write_text(digest.hexdigest())
+        target = self.vendor / "target"
+        target.mkdir(exist_ok=True)
+        (target / ".solaris-mio-event-ports.sha256").write_text(
+            hashlib.sha256(files["src/sys/unix/selector/event_ports.rs"].encode()).hexdigest()
+        )
+        return root
+
+    def test_mio_checksums_support_both_selector_waker_layouts(self):
+        for waker in ("event_ports.rs", "selector.rs"):
+            with self.subTest(waker=waker):
+                root = self.mio(waker)
+                self.assert_idempotent(
+                    "patch_vendored_mio_event_ports", TOP=str(ROOT),
+                    CODEX_SRC_DIR=str(self.vendor),
+                )
+                self.check_checksums(root)
+
+    def test_mio_unknown_waker_layout_fails(self):
+        self.mio()
+        result = self.run_patch(
+            "patch_vendored_mio_event_ports", TOP=str(ROOT),
+            CODEX_SRC_DIR=str(self.vendor),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing vendored mio selector-backed waker", result.stderr)
 
 
 if __name__ == "__main__":

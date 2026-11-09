@@ -1,0 +1,24 @@
+Subject: [PATCH] base: constrain the signed-byte unaligned-read overload
+
+Older Solaris headers typedef int8_t to char rather than signed char. The
+char and int8_t overloads then have identical signatures, which breaks V8's
+cppgc build. Keep the int8_t overload only for a distinct signed-byte type;
+the existing char overload handles the legacy typedef without ambiguity.
+
+Constrain the deduced type to int8_t so unrelated pointer types do not gain
+an unaligned-read overload. No integer typedef or ABI changes are needed.
+
+--- a/v8-152.2.0/v8/src/base/memory.h
++++ b/v8-152.2.0/v8/src/base/memory.h
+@@ -37,8 +37,9 @@
+   return ReadUnalignedValue<V>(reinterpret_cast<Address>(p));
+ }
+ 
+-template <typename V>
+-static inline V ReadUnalignedValue(const int8_t p[sizeof(V)]) {
++template <typename V, typename Byte>
++  requires(std::is_same_v<Byte, int8_t> && !std::is_same_v<Byte, char>)
++static inline V ReadUnalignedValue(const Byte p[sizeof(V)]) {
+   return ReadUnalignedValue<V>(reinterpret_cast<Address>(p));
+ }
+ 

@@ -196,6 +196,8 @@ def run_case(args, mode):
         "features.code_mode_prewarm": True,
         "features.code_mode_host.disable_in_process_fallback": True,
         "features.shell_snapshot": False,
+        # Keep unrelated public plugin downloads out of this local fixture.
+        "features.plugins": False,
         "features.enable_request_compression": False,
         "features.local_thread_store_compression": False,
         "check_for_update_on_startup": False,

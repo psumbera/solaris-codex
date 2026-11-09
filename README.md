@@ -78,15 +78,16 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.166.0/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.167.0/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
 Add `--expect-v8` on x64. Use a new output directory for each run. The fixture
 uses a local fake model server to verify file edits, shell execution and saved
-sessions; on x64 it also executes JavaScript through V8. It does not require
-credentials. It runs fixed commands in its scratch directory with sandboxing
-disabled, so it does not validate Solaris sandbox enforcement.
+sessions; on x64 it also executes JavaScript through V8. It requires no
+credentials and disables unrelated plugin downloads. It runs fixed commands
+in its scratch directory with sandboxing disabled, so it does not validate
+Solaris sandbox enforcement.
 
 To test the final installed binary's SQLite startup on Solaris NFS, add
 `--nfs-root "$HOME/.codex-testing"` (an existing NFS directory) and use
@@ -100,6 +101,14 @@ Patch syntax is validated with Git before GNU patch applies any series;
 incorrect hunk lengths can otherwise silently omit changes even with zero
 fuzz. Run `python3.13 -m unittest test_patch_series.py test_vendor_patches.py`
 to check that gate and the checksum-aware dependency adjustments.
+
+On x64, `python3 -m unittest test_v8_headers.py` compiles the prepared V8
+memory header with both current and legacy Solaris `int8_t` typedefs. Older
+Solaris headers alias `int8_t` to `char`, which otherwise creates duplicate
+unaligned-read overloads. The tests also reproduce the unpatched failure;
+the distinct-type test is skipped on systems without the typedef switch.
+GitHub CI runs these checks and the deterministic tool smoke tests, then
+packages both `codex` and `codex-code-mode-host` together.
 
 ## Monitoring Running Sessions
 
@@ -133,7 +142,7 @@ SQLite, it adds no database locks and works with both local and NFS-backed
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.166.0`, built from its `codex-rs/` workspace.
+  `rust-v0.167.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -186,6 +195,7 @@ After `cargo vendor`, `build-codex.sh` still applies the remaining Solaris
 vendored-crate rewrites in place:
 
 - `patch_vendored_nix_termios()`
+- `patch_vendored_mxc()`
 - `patch_vendored_tree_sitter_endian()`
 - `patch_vendored_fslock()`
 - `patch_vendored_onig_sys_alloca()`
@@ -193,9 +203,9 @@ vendored-crate rewrites in place:
 
 Those helpers remain scripted because they also update vendored crate
 `.cargo-checksum.json`, which makes static patch files awkward to maintain.
-The mio event-ports rewrite applies the upstream accepted changes from
-`https://github.com/tokio-rs/mio/pull/1962`, refreshed against the `mio 1.2.0`
-crate version locked by Codex. The fallback polling fix is the production
+The Mio 1.2.4 crate selected by Codex already includes the base event-ports
+implementation from `https://github.com/tokio-rs/mio/pull/1962`, so the wrapper
+does not reapply that base patch. The fallback polling fix is the production
 change from `https://github.com/tokio-rs/mio/pull/2005` at commit `c045606`.
 It retains bounded `poll(2)` fallback for readiness that Solaris event ports
 can lose. Follow-up patches coalesce repeated event-port wakeups and preserve
@@ -203,6 +213,8 @@ bounded writable re-notification across consecutive zero-timeout polls. The
 latter is required when Tokio clears cached write readiness and continues
 polling without blocking; without it, network writes can stall while the
 runtime spins on Solaris.
+Checksum handling supports both the older event-port waker file and the shared
+selector-backed waker used by newer Mio releases.
 
 ## Maintainer Notes
 

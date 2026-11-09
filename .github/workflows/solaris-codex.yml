@@ -13,6 +13,8 @@ on:
       - "prepare-rust.sh"
       - "prepare-sources.sh"
       - "versions.sh"
+      - "smoke-tools.py"
+      - "test_*.py"
       - "patches/**"
       - "support/**"
   workflow_dispatch:
@@ -58,11 +60,24 @@ jobs:
             cd "$WORK"
 
             export SOLARIS_CODEX_JOBS=1
+            export TMPDIR="$WORK/build/tmp"
+            mkdir -p "$TMPDIR"
             bash build-codex.sh
 
             build/install/gn/bin/gn --version
             test -f build/install/v8/lib/librusty_v8.a
             build/install/codex/bin/codex --version
+            build/install/codex/bin/codex-code-mode-host --help
+
+            python3 -m unittest test_codex_status.py test_patch_series.py \
+              test_vendor_patches.py test_v8_headers.py
+            . ./versions.sh
+            CODEX_SOURCE="$WORK/build/src/codex-rust-v$SOLARIS_CODEX_VERSION"
+            python3 smoke-tools.py \
+              --codex "$WORK/build/install/codex/bin/codex" \
+              --catalog "$CODEX_SOURCE/codex-rs/models-manager/models.json" \
+              --output "$WORK/build/ci-smoke" --expect-v8
+            test "`wc -c < build/install/codex/bin/codex`" -lt 1000000000
 
             VERSION=`build/install/codex/bin/codex --version | /usr/bin/nawk '
               match($0, /[0-9]+(\.[0-9]+)+/) {
@@ -78,7 +93,10 @@ jobs:
             rm -rf "$PACKAGE_DIR"
             mkdir -p "$PACKAGE_DIR/bin" "$REPO/archives"
             cp build/install/codex/bin/codex "$PACKAGE_DIR/bin/codex"
-            chmod 0755 "$PACKAGE_DIR/bin/codex"
+            cp build/install/codex/bin/codex-code-mode-host \
+              "$PACKAGE_DIR/bin/codex-code-mode-host"
+            chmod 0755 "$PACKAGE_DIR/bin/codex" \
+              "$PACKAGE_DIR/bin/codex-code-mode-host"
 
             (
               cd /var/tmp
@@ -152,7 +170,7 @@ jobs:
           git tag -f -a "$TAG" -m "Codex $VERSION for Solaris i386"
           git push --force origin "refs/tags/$TAG"
 
-          NOTES="Solaris i386 Codex $VERSION binary built by GitHub Actions."
+          NOTES="Solaris i386 Codex $VERSION CLI and code-mode host built by GitHub Actions."
           TARBALL="archives/${ASSET_PREFIX}.tar.gz"
           CHECKSUM="archives/${ASSET_PREFIX}.tar.gz.sha256"
 

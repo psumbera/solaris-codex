@@ -489,8 +489,13 @@ paths = [
     "src/poll.rs",
     "src/sys/unix/mod.rs",
     "src/sys/unix/selector/event_ports.rs",
-    "src/sys/unix/waker/event_ports.rs",
 ]
+for waker in ("src/sys/unix/waker/event_ports.rs", "src/sys/unix/waker/selector.rs"):
+    if (root / waker).is_file():
+        paths.append(waker)
+        break
+else:
+    raise SystemExit("missing vendored mio selector-backed waker source")
 
 data = json.loads(checksum_json.read_text())
 files = data.setdefault("files", {})
@@ -499,7 +504,9 @@ for rel in paths:
     if not path.is_file():
         raise SystemExit(f"missing vendored mio file: {path}")
     files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
-checksum_json.write_text(json.dumps(data, separators=(",", ":")))
+serialized = json.dumps(data, separators=(",", ":"))
+if checksum_json.read_text() != serialized:
+    checksum_json.write_text(serialized)
 PY2
 
   # Cargo assumes registry sources are immutable and can retain a stale Mio
