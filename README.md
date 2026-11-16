@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.167.0/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.169.0/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -142,7 +142,7 @@ SQLite, it adds no database locks and works with both local and NFS-backed
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.167.0`, built from its `codex-rs/` workspace.
+  `rust-v0.169.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -181,7 +181,18 @@ patch series under `patches/codex/` before vendoring:
   TUI startup in embedded mode because this distribution does not install the
   complete standalone package tree required for daemon bootstrap.
 - `0015-shell-snapshot-use-platform-waitid-pid-type.patch` passes the native
-  `id_t` to `waitid(2)` when observing shell snapshot captures on Solaris.
+  `id_t` to `waitid(2)` when observing shell snapshot captures and testing
+  PTY child lifecycle handling on Solaris.
+- `0016-pty-observe-error-readiness-on-slave-close.patch` lets asynchronous
+  PTY I/O observe error readiness as well as readable/writable events. Solaris
+  can report only `POLLERR` when the slave closes; without it, output draining
+  can remain pending after the child exits. An idle-slave-close regression
+  covers this case without relying on a final buffered output wakeup. On
+  termination, it also releases the master after aborting I/O, so a killed
+  Solaris child cannot remain stuck closing a full STREAMS terminal.
+- `0017-pty-test-check-closed-descriptor-after-shell-exec.patch` checks excluded
+  descriptors after shell-private descriptors have been closed by exec,
+  avoiding false failures from Solaris `/dev/fd` and shell behavior.
 
 Before vendoring, `patch_tui_solaris_terminal_input()` keeps the TUI off
 terminal capability probes that stalled some Solaris PTYs, replaces the

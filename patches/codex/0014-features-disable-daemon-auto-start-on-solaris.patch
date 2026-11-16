@@ -21,7 +21,7 @@ diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 +        default_enabled: !cfg!(target_os = "solaris"),
      },
      FeatureSpec {
-         id: Feature::TuiMultiBackend,
+         id: Feature::TuiWorkspace,
 diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
 --- a/codex-rs/features/src/tests.rs
 +++ b/codex-rs/features/src/tests.rs

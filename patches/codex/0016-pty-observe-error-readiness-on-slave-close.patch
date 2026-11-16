@@ -1,0 +1,121 @@
+Subject: [PATCH] pty: observe error readiness while waiting for Unix I/O
+
+Solaris PTY masters can report POLLERR, without POLLIN or POLLHUP, when
+the final slave closes. Tokio exposes error readiness separately from
+readable readiness, so a reader that last saw EAGAIN can otherwise wait
+forever instead of observing EOF. This also leaves terminal-query and
+command-output draining tasks pending after their child has exited.
+
+Also release the retained master on Solaris after aborting PTY I/O during
+termination. Otherwise a killed slave can block in STREAMS close while
+its undrained output has filled the terminal queues. The existing full-
+output-channel termination test exercises both PTY launch paths.
+
+Register and await error readiness for both PTY directions, then let the
+underlying read/write report EOF or the actual error. Other Unix backends
+keep their existing readable/writable and closed-event behavior. Add a
+regression that parks a reader before closing an idle slave, so buffered
+output cannot hide the missing wakeup.
+
+diff --git a/codex-rs/utils/pty/src/unix_io.rs b/codex-rs/utils/pty/src/unix_io.rs
+--- a/codex-rs/utils/pty/src/unix_io.rs
++++ b/codex-rs/utils/pty/src/unix_io.rs
+@@ -35,8 +35,15 @@
+         // Async tasks can be aborted even when a detached child keeps the PTY open
+         // or the output channel is full; blocking read/send tasks cannot.
+         // AsyncFd panics if the current runtime has no I/O driver.
+-        let fd = std::panic::catch_unwind(move || AsyncFd::new(File::from(fd)))
+-            .map_err(|_| io::Error::other("PTY I/O requires a Tokio runtime with I/O enabled"))??;
++        // Solaris PTY masters can report only POLLERR when the slave closes.
++        // Observe errors as well so pending I/O can discover EOF or failure.
++        let fd = std::panic::catch_unwind(move || {
++            AsyncFd::with_interest(
++                File::from(fd),
++                Interest::READABLE | Interest::WRITABLE | Interest::ERROR,
++            )
++        })
++        .map_err(|_| io::Error::other("PTY I/O requires a Tokio runtime with I/O enabled"))??;
+         Ok(Self { fd: Arc::new(fd) })
+     }
+ 
+@@ -52,7 +59,9 @@
+             let mut buf = [0u8; 8_192];
+             loop {
+                 match reader
+-                    .async_io(Interest::READABLE, |mut file| file.read(&mut buf))
++                    .async_io(Interest::READABLE | Interest::ERROR, |mut file| {
++                        file.read(&mut buf)
++                    })
+                     .await
+                 {
+                     Ok(0) => break,
+@@ -96,7 +105,9 @@
+ async fn write_all(fd: &AsyncFd<File>, mut bytes: &[u8]) -> io::Result<()> {
+     while !bytes.is_empty() {
+         match fd
+-            .async_io(Interest::WRITABLE, |mut file| file.write(bytes))
++            .async_io(Interest::WRITABLE | Interest::ERROR, |mut file| {
++                file.write(bytes)
++            })
+             .await
+         {
+             Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+@@ -107,3 +118,42 @@
+     }
+     Ok(())
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::time::Duration;
++    use tokio::time::timeout;
++
++    #[tokio::test]
++    async fn reader_finishes_when_idle_slave_closes() {
++        let pair = portable_pty::native_pty_system()
++            .openpty(portable_pty::PtySize::default())
++            .expect("open PTY");
++        let fd = pair.master.as_raw_fd().expect("PTY descriptor");
++        let (stdout_tx, mut stdout_rx) = mpsc::channel(1);
++        let (_writer_tx, writer_rx) = mpsc::channel(1);
++        let (reader, writer) = PtyIo::new(fd).expect("PTY I/O registration").spawn(
++            stdout_tx,
++            writer_rx,
++            StdinCloseBehavior::NoEof,
++        );
++
++        // Park the reader before closing the last slave. No final output can
++        // accidentally wake it and hide a missing error-readiness interest.
++        assert!(
++            timeout(Duration::from_millis(20), stdout_rx.recv())
++                .await
++                .is_err()
++        );
++        drop(pair.slave);
++        let closed = timeout(Duration::from_secs(2), stdout_rx.recv()).await;
++        reader.abort();
++        writer.abort();
++        assert!(
++            closed
++                .expect("PTY reader must observe slave closure")
++                .is_none()
++        );
++    }
++}
+diff --git a/codex-rs/utils/pty/src/process.rs b/codex-rs/utils/pty/src/process.rs
+--- a/codex-rs/utils/pty/src/process.rs
++++ b/codex-rs/utils/pty/src/process.rs
+@@ -264,6 +264,12 @@
+             && let Some(handle) = h.take()
+         {
+             handle.abort();
++        }
++        #[cfg(target_os = "solaris")]
++        if let Ok(mut handles) = self._pty_handles.lock() {
++            // Solaris STREAMS can hold a killed slave in close while its
++            // output is backed up. I/O is aborted, so release the master too.
++            handles.take();
+         }
+         if let Ok(mut h) = self.wait_handle.lock()
+             && let Some(handle) = h.take()

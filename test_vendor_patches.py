@@ -74,6 +74,20 @@ class VendorPatchTests(unittest.TestCase):
         self.crate("nix", {"src/sys/termios.rs": "unknown layout\n"})
         self.assertNotEqual(self.run_patch("patch_vendored_nix_termios").returncode, 0)
 
+    def test_tree_sitter_endian_patch_does_not_repeat_or_invalidate_caches(self):
+        root = self.crate("tree-sitter", {
+            "src/portable/endian.h":
+                "#else\n\n#    error platform not supported\n\n#endif\n",
+        })
+        self.assert_idempotent("patch_vendored_tree_sitter_endian")
+        self.assertEqual((root / "src/portable/endian.h").read_text().count(
+            "#elif defined(__sun)"), 1)
+        self.check_checksums(root)
+
+    def test_unknown_tree_sitter_endian_layout_fails(self):
+        self.crate("tree-sitter", {"src/portable/endian.h": "unknown layout\n"})
+        self.assertNotEqual(self.run_patch("patch_vendored_tree_sitter_endian").returncode, 0)
+
     def test_mxc_keeps_unsupported_host_rejection_and_patches_idempotently(self):
         root = self.crate("mxc-sdk", {
             "src/core/mxc_engine/dispatch.rs":

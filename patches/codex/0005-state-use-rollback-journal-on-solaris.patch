@@ -64,7 +64,7 @@ diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_test
 +}
  
  #[tokio::test]
- async fn configured_log_directory_is_initialized_on_use_and_retries_after_failure()
+ async fn current_schema_opens_while_another_connection_has_writer_reservation() -> anyhow::Result<()>
 @@ -59,6 +67,10 @@
  
  #[cfg(unix)]

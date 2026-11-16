@@ -192,7 +192,9 @@ new = """#elif defined(__sun)
 #endif
 """
 
-if old in text:
+if new in text:
+    pass
+elif old in text:
     text = text.replace(old, new, 1)
     changed = True
 elif '__sun' not in text:
@@ -204,7 +206,9 @@ if changed:
 digest = hashlib.sha256(endian_h.read_bytes()).hexdigest()
 data = json.loads(checksum_json.read_text())
 data['files']['src/portable/endian.h'] = digest
-checksum_json.write_text(json.dumps(data, separators=(',', ':')))
+serialized = json.dumps(data, separators=(',', ':'))
+if checksum_json.read_text() != serialized:
+    checksum_json.write_text(serialized)
 PY2
 }
 
@@ -566,7 +570,7 @@ if new not in text:
         raise SystemExit("failed to patch tui.rs crossterm mode imports")
     text = text.replace(old, new, 1)
 
-old = """pub fn set_modes() -> Result<()> {
+old = """fn set_modes() -> Result<tmux::Options> {
     ensure_virtual_terminal_processing()?;
 
     execute!(stdout(), EnableBracketedPaste)?;
@@ -580,16 +584,16 @@ old = """pub fn set_modes() -> Result<()> {
     // Some terminals (notably legacy Windows consoles) do not support
     // keyboard enhancement flags. Attempt to enable them, but continue
     // gracefully if unsupported.
-    keyboard_modes::enable_keyboard_enhancement(&mut stdout());
+    let options = keyboard_modes::enable_keyboard_enhancement(&mut stdout());
 
     #[cfg(not(windows))]
     let _ = execute!(stdout(), EnableFocusChange);
     #[cfg(windows)]
     let _ = execute!(stdout(), DisableFocusChange);
-    Ok(())
+    Ok(options)
 }
 """
-new = """pub fn set_modes() -> Result<()> {
+new = """fn set_modes() -> Result<tmux::Options> {
     ensure_virtual_terminal_processing()?;
 
     enable_raw_mode()?;
@@ -597,7 +601,7 @@ new = """pub fn set_modes() -> Result<()> {
     windows_console::set_input_record_mode()?;
 
     #[cfg(not(target_os = \"solaris\"))]
-    {
+    let options = {
         execute!(stdout(), EnableBracketedPaste)?;
 
         // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
@@ -606,15 +610,22 @@ new = """pub fn set_modes() -> Result<()> {
         // Some terminals (notably legacy Windows consoles) do not support
         // keyboard enhancement flags. Attempt to enable them, but continue
         // gracefully if unsupported.
-        keyboard_modes::enable_keyboard_enhancement(&mut stdout());
+        let options = keyboard_modes::enable_keyboard_enhancement(&mut stdout());
 
         #[cfg(not(windows))]
         let _ = execute!(stdout(), EnableFocusChange);
         #[cfg(windows)]
         let _ = execute!(stdout(), DisableFocusChange);
-    }
+        options
+    };
 
-    Ok(())
+    #[cfg(target_os = \"solaris\")]
+    let options = tmux::Options {
+        mouse_capture: tmux::MouseCapture::DisabledByTmux,
+        ..tmux::Options::default()
+    };
+
+    Ok(options)
 }
 """
 if new not in text:
@@ -725,7 +736,8 @@ if new not in text:
         raise SystemExit("failed to patch tui.rs startup probes")
     text = text.replace(old, new, 1)
 
-tui_rs.write_text(text)
+if tui_rs.read_text() != text:
+    tui_rs.write_text(text)
 
 alternate_screen_rs = Path(sys.argv[3])
 text = alternate_screen_rs.read_text()
@@ -740,14 +752,14 @@ if "use super::tmux::MouseCapture;" not in text:
         1,
     )
 
-old = """        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer);
+old = """        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer).mouse_capture;
         self.keyboard_active.store(
             !cfg!(windows) && !keyboard_modes::keyboard_enhancement_disabled(),
             Ordering::Relaxed,
         );
 """
 new = """        #[cfg(not(target_os = \"solaris\"))]
-        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer);
+        let mouse_capture = keyboard_modes::enable_keyboard_enhancement(writer).mouse_capture;
         #[cfg(target_os = \"solaris\")]
         // The Solaris event source intentionally uses a small keyboard-only
         // reader instead of crossterm's EventStream. Leave mouse handling to
@@ -824,7 +836,8 @@ if solaris_test not in text:
         raise SystemExit("failed to add alternate_screen.rs Solaris mouse test")
     text = text.replace(marker, solaris_test + marker, 1)
 
-alternate_screen_rs.write_text(text)
+if alternate_screen_rs.read_text() != text:
+    alternate_screen_rs.write_text(text)
 
 event_stream_rs = Path(sys.argv[2])
 text = event_stream_rs.read_text()
@@ -1209,7 +1222,8 @@ if "let key_event = crossterm::event::KeyEvent" not in text:
         raise SystemExit("failed to patch event_stream.rs solaris key kind")
     text = text.replace(old, new, 1)
 
-event_stream_rs.write_text(text)
+if event_stream_rs.read_text() != text:
+    event_stream_rs.write_text(text)
 PY
 }
 

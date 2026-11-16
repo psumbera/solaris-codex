@@ -5,6 +5,8 @@ as a signed id_t. Cast the OS-created child PID to the libc API's native type;
 its value is already a valid process ID. Preserve WNOWAIT and process-group
 cleanup semantics. On platforms with an unsigned id_t this is unchanged.
 
+Use the same native PID type in the PTY child lifecycle tests.
+
 diff --git a/codex-rs/exec-server/src/shell_snapshot_process.rs b/codex-rs/exec-server/src/shell_snapshot_process.rs
 --- a/codex-rs/exec-server/src/shell_snapshot_process.rs
 +++ b/codex-rs/exec-server/src/shell_snapshot_process.rs
@@ -17,3 +19,24 @@ diff --git a/codex-rs/exec-server/src/shell_snapshot_process.rs b/codex-rs/exec-
                          info.as_mut_ptr(),
                          libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
                      )
+diff --git a/codex-rs/utils/pty/src/child_tests.rs b/codex-rs/utils/pty/src/child_tests.rs
+--- a/codex-rs/utils/pty/src/child_tests.rs
++++ b/codex-rs/utils/pty/src/child_tests.rs
+@@ -120,7 +120,7 @@
+             unsafe {
+                 libc::waitid(
+                     libc::P_PID,
+-                    pid,
++                    pid as libc::id_t,
+                     info.as_mut_ptr(),
+                     libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                 )
+@@ -145,7 +145,7 @@
+         if unsafe {
+             libc::waitid(
+                 libc::P_PID,
+-                pid,
++                pid as libc::id_t,
+                 info.as_mut_ptr(),
+                 libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+             )

@@ -1,0 +1,28 @@
+Subject: [PATCH] pty tests: probe excluded descriptors after shell exec
+
+Solaris /dev/fd can stat a closed descriptor slot, so test -e does not
+establish whether the descriptor is inherited. A shell redirection is
+also insufficient: ksh temporarily opens the working directory in the
+first free slot while executing a subshell, reusing the excluded number.
+
+Probe the excluded descriptor with an external cat instead. Exec closes
+the shell-private CLOEXEC descriptors, and opening /dev/fd/N then fails
+for a closed slot. Keep the final content check for the preserved file.
+
+diff --git a/codex-rs/utils/pty/src/pipe_unix_tests.rs b/codex-rs/utils/pty/src/pipe_unix_tests.rs
+--- a/codex-rs/utils/pty/src/pipe_unix_tests.rs
++++ b/codex-rs/utils/pty/src/pipe_unix_tests.rs
+@@ -41,9 +41,12 @@
+         .map(AsRawFd::as_raw_fd)
+         .collect::<Vec<_>>();
+     let excluded = descriptors[16].as_raw_fd();
++    // Solaris can stat closed /dev/fd slots, and its shell can temporarily
++    // reuse the excluded slot. An external command closes shell-private fds.
+     let script = format!(
+         "for fd in \"$@\"; do test -e /dev/fd/$fd || exit 10; done; \
+-         test ! -e /dev/fd/{excluded} || exit 11; /bin/cat /dev/fd/$1"
++         if /bin/cat /dev/fd/{excluded} >/dev/null 2>&1; then exit 11; fi; \
++         /bin/cat /dev/fd/$1"
+     );
+     let mut args = vec!["-c".to_owned(), script, "sh".to_owned()];
+     args.extend(targets.iter().map(ToString::to_string));

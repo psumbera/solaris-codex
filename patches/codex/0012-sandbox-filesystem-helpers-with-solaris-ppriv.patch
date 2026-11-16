@@ -366,18 +366,18 @@ diff --git a/codex-rs/sandboxing/src/lib.rs b/codex-rs/sandboxing/src/lib.rs
 diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
 --- a/codex-rs/sandboxing/src/manager.rs
 +++ b/codex-rs/sandboxing/src/manager.rs
-@@ -13,6 +13,10 @@
- use crate::resolve_windows_restricted_token_filesystem_overrides;
+@@ -10,6 +10,10 @@
+ use crate::policy_transforms::should_require_platform_sandbox;
  #[cfg(target_os = "macos")]
  use crate::seatbelt::MacosSeatbeltProfile;
 +#[cfg(target_os = "solaris")]
 +use crate::solaris::SOLARIS_PATH_TO_PPRIV_EXECUTABLE;
 +#[cfg(target_os = "solaris")]
 +use crate::solaris::create_solaris_privileges_command_args;
- #[cfg(target_os = "windows")]
- use crate::windows_sandbox_uses_elevated_backend;
  use codex_network_proxy::ManagedNetworkSandboxContext;
-@@ -208,6 +212,10 @@
+ use codex_network_proxy::NetworkProxy;
+ use codex_protocol::config_types::WindowsSandboxLevel;
+@@ -222,6 +226,10 @@
      SeatbeltUnavailable,
      #[cfg(target_os = "windows")]
      WindowsSandboxPreparation(String),
@@ -388,10 +388,10 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
  }
  
  impl std::fmt::Display for SandboxTransformError {
-@@ -243,6 +251,17 @@
+@@ -261,6 +269,17 @@
              #[cfg(target_os = "windows")]
              Self::WindowsSandboxPreparation(err) => {
-                 write!(f, "failed to prepare windows sandbox wrapper: {err}")
+                 write!(f, "failed to prepare Windows sandbox: {err}")
 +            }
 +            #[cfg(target_os = "solaris")]
 +            Self::SolarisSandboxPreparation(err) => {
@@ -406,7 +406,7 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
              }
          }
      }
-@@ -264,6 +283,10 @@
+@@ -283,6 +302,10 @@
              Self::SeatbeltUnavailable => None,
              #[cfg(target_os = "windows")]
              Self::WindowsSandboxPreparation(_) => None,
@@ -417,8 +417,8 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
          }
      }
  }
-@@ -275,6 +298,8 @@
-     seatbelt_profile: MacosSeatbeltProfile,
+@@ -296,6 +319,8 @@
+     extra_allow_unix_sockets: Vec<AbsolutePathBuf>,
      #[cfg(target_os = "macos")]
      allowed_symlinked_codex_home: Option<AbsolutePathBuf>,
 +    #[cfg(target_os = "solaris")]
@@ -426,51 +426,192 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
  }
  
  impl SandboxManager {
-@@ -290,6 +315,8 @@
-             seatbelt_profile: MacosSeatbeltProfile::FileSystemHelper,
+@@ -308,6 +333,8 @@
+         Self {
              #[cfg(target_os = "macos")]
-             allowed_symlinked_codex_home: None,
+             seatbelt_profile: MacosSeatbeltProfile::FileSystemHelper,
 +            #[cfg(target_os = "solaris")]
 +            enable_solaris_sandbox: true,
+             ..Self::default()
          }
+     }
+@@ -343,6 +370,14 @@
+         self
      }
  
-@@ -325,6 +352,10 @@
-         }
-         if cfg!(windows) && windows_sandbox_type == SandboxType::WindowsMxc {
-             return SandboxType::WindowsMxc;
-+        }
++    fn platform_sandbox(&self, windows_sandbox_enabled: bool) -> Option<SandboxType> {
 +        #[cfg(target_os = "solaris")]
 +        if self.enable_solaris_sandbox {
-+            return SandboxType::SolarisExtendedPrivileges;
++            return Some(SandboxType::SolarisExtendedPrivileges);
++        }
++        get_platform_sandbox(windows_sandbox_enabled)
++    }
++
+     pub fn select_initial(
+         &self,
+         permission_profile: &PermissionProfile,
+@@ -359,7 +394,8 @@
+         if cfg!(windows) && windows_sandbox_type == SandboxType::WindowsMxc {
+             return SandboxType::WindowsMxc;
          }
-         get_platform_sandbox(windows_sandbox_type != SandboxType::None).unwrap_or(SandboxType::None)
+-        get_platform_sandbox(windows_sandbox_type != SandboxType::None).unwrap_or(SandboxType::None)
++        self.platform_sandbox(windows_sandbox_type != SandboxType::None)
++            .unwrap_or(SandboxType::None)
      }
-@@ -526,6 +557,24 @@
-                     Some(pending),
-                 )
+ 
+     /// Returns whether the request needs a sandbox, independently of whether
+@@ -407,8 +443,10 @@
+             SandboxSelection::RequirePlatform => {
+                 #[cfg(windows)]
+                 crate::windows_mxc::record_availability_once();
+-                get_platform_sandbox(request.windows_sandbox_level != WindowsSandboxLevel::Disabled)
+-                    .ok_or(SandboxTransformError::SandboxUnavailable)?
++                self.platform_sandbox(
++                    request.windows_sandbox_level != WindowsSandboxLevel::Disabled,
++                )
++                .ok_or(SandboxTransformError::SandboxUnavailable)?
              }
+         };
+         #[cfg(windows)]
+@@ -425,7 +463,9 @@
+             SandboxType::LinuxSeccomp | SandboxType::WindowsMxc => {
+                 request.sandbox_exe.map(Path::as_os_str)
+             }
+-            SandboxType::MacosSeatbelt | SandboxType::WindowsRestrictedToken => None,
++            SandboxType::MacosSeatbelt
++            | SandboxType::WindowsRestrictedToken
++            | SandboxType::SolarisExtendedPrivileges => None,
+         }
+         .filter(|path| path.to_str().is_none())
+         .map(OsStr::to_owned);
+@@ -595,6 +635,24 @@
+                     request.use_legacy_landlock,
+                     route.as_ref(),
+                 )?;
++            }
 +            #[cfg(target_os = "solaris")]
 +            SandboxType::SolarisExtendedPrivileges => {
-+                let pending = pending_sandboxed_request?;
++                let pending = pending?;
++                exec.permission_profile = pending.effective_permission_profile;
 +                let args = create_solaris_privileges_command_args(
-+                    argv,
-+                    &pending.effective_permission_profile,
++                    std::mem::take(&mut exec.command),
++                    &exec.permission_profile,
 +                    pending.native_sandbox_policy_cwd.as_path(),
 +                )
 +                .map_err(SandboxTransformError::SolarisSandboxPreparation)?;
-+                let mut full_command = Vec::with_capacity(1 + args.len());
-+                full_command.push(SOLARIS_PATH_TO_PPRIV_EXECUTABLE.to_string());
-+                full_command.extend(args);
-+                (full_command, None, Some(pending))
++                exec.command = std::iter::once(SOLARIS_PATH_TO_PPRIV_EXECUTABLE.to_owned())
++                    .chain(args)
++                    .collect();
 +            }
 +            #[cfg(not(target_os = "solaris"))]
 +            SandboxType::SolarisExtendedPrivileges => {
 +                return Err(SandboxTransformError::SolarisSandboxUnavailable);
-+            }
-             #[cfg(target_os = "windows")]
+             }
              SandboxType::WindowsRestrictedToken => {
-                 if enforce_managed_network && windows_sandbox_level != WindowsSandboxLevel::Elevated
+                 exec.permission_profile = pending?.effective_permission_profile;
+diff --git a/codex-rs/sandboxing/src/manager_tests.rs b/codex-rs/sandboxing/src/manager_tests.rs
+--- a/codex-rs/sandboxing/src/manager_tests.rs
++++ b/codex-rs/sandboxing/src/manager_tests.rs
+@@ -25,6 +25,99 @@
+ use pretty_assertions::assert_eq;
+ use std::collections::HashMap;
+ use tempfile::TempDir;
++
++#[cfg(target_os = "solaris")]
++mod solaris_tests {
++    use super::*;
++    use pretty_assertions::assert_eq;
++    use std::ffi::OsStr;
++
++    #[test]
++    fn solaris_only_filesystem_helpers_select_extended_privileges() {
++        for (manager, expected) in [
++            (SandboxManager::new(), SandboxType::None),
++            (
++                SandboxManager::for_file_system_helpers(),
++                SandboxType::SolarisExtendedPrivileges,
++            ),
++        ] {
++            assert_eq!(
++                manager.select_initial(
++                    &PermissionProfile::read_only(),
++                    SandboxablePreference::Auto,
++                    SandboxType::None,
++                    false,
++                ),
++                expected,
++            );
++        }
++        assert_eq!(
++            SandboxManager::for_file_system_helpers().select_initial(
++                &PermissionProfile::read_only(),
++                SandboxablePreference::Forbid,
++                SandboxType::None,
++                false,
++            ),
++            SandboxType::None,
++        );
++    }
++
++    #[test]
++    fn solaris_wrapped_direct_command_keeps_ppriv_and_launch_context() {
++        let directory = TempDir::new().expect("temporary workspace");
++        let workspace =
++            AbsolutePathBuf::from_absolute_path(directory.path()).expect("absolute workspace");
++        let cwd = PathUri::from_abs_path(&workspace);
++        let permissions = PermissionProfile::from_runtime_permissions(
++            &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry::new(
++                workspace.clone().into(),
++                FileSystemAccessMode::Write,
++            )]),
++            NetworkSandboxPolicy::Restricted,
++        );
++        let request = || SandboxTransformRequest {
++            command: SandboxCommand {
++                program: "helper".into(),
++                args: vec!["--request".into()],
++                cwd: cwd.clone(),
++                env: HashMap::from([("SOLARIS_SANDBOX_TEST".into(), "preserved".into())]),
++                managed_network: None,
++                additional_permissions: None,
++            },
++            permissions: &permissions,
++            workspace_roots: None,
++            runtime_readable_paths: &[],
++            selection: SandboxSelection::RequirePlatform,
++            enforce_managed_network: false,
++            environment_id: None,
++            network: None,
++            sandbox_policy_cwd: &cwd,
++            sandbox_exe: None,
++            use_legacy_landlock: false,
++            windows_sandbox_level: WindowsSandboxLevel::Disabled,
++        };
++        assert!(matches!(
++            SandboxManager::new().transform(request()),
++            Err(super::super::SandboxTransformError::SandboxUnavailable)
++        ));
++        let command = SandboxManager::for_file_system_helpers()
++            .transform(request())
++            .expect("Solaris sandbox transformation")
++            .into_direct_command()
++            .expect("direct sandbox command");
++        assert_eq!(command.get_program(), OsStr::new("/usr/bin/ppriv"));
++        assert_eq!(command.get_current_dir(), Some(workspace.as_path()));
++        let args: Vec<_> = command
++            .get_args()
++            .map(|arg| arg.to_str().unwrap())
++            .collect();
++        assert!(args.ends_with(&["-e", "helper", "--request"]));
++        assert!(args.windows(2).any(|pair| pair == ["-s", "I-net_access"]));
++        assert!(command.get_envs().any(|(key, value)| {
++            key == OsStr::new("SOLARIS_SANDBOX_TEST") && value == Some(OsStr::new("preserved"))
++        }));
++    }
++}
+ 
+ #[test]
+ fn danger_full_access_defaults_to_no_sandbox_without_network_requirements() {
 diff --git a/codex-rs/sandboxing/src/solaris.rs b/codex-rs/sandboxing/src/solaris.rs
 --- /dev/null
 +++ b/codex-rs/sandboxing/src/solaris.rs
@@ -658,3 +799,14 @@ diff --git a/codex-rs/sandboxing/src/violation.rs b/codex-rs/sandboxing/src/viol
          SandboxType::WindowsRestrictedToken => SandboxViolationBackend::WindowsSandbox,
          SandboxType::WindowsMxc => SandboxViolationBackend::WindowsMxc,
      };
+diff --git a/codex-rs/cli/src/debug_sandbox.rs b/codex-rs/cli/src/debug_sandbox.rs
+--- a/codex-rs/cli/src/debug_sandbox.rs
++++ b/codex-rs/cli/src/debug_sandbox.rs
+@@ -375,6 +375,7 @@
+         WindowsMxc => Some(std::env::current_exe()?),
+         SandboxBackend::None
+         | SandboxBackend::MacosSeatbelt
++        | SandboxBackend::SolarisExtendedPrivileges
+         | SandboxBackend::WindowsRestrictedToken => None,
+     };
+     let mut command = command.into_iter();
