@@ -344,9 +344,11 @@ PY
 }
 
 v8_source_identity() {
-  printf '%s\n%s\n%s\n' \
+  printf '%s\n%s\n%s\n%s\n%s\n' \
     "${V8_GIT_URL}" \
     "${V8_GIT_REF}" \
+    "${RUST_VERSION}" \
+    "${RUST_TRIPLE}" \
     "$(patch_series_sha256 "${TOP}/patches/v8")"
 }
 

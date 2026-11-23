@@ -660,8 +660,11 @@ old = """    #[cfg(unix)]
         } else {
             StartupKeyboardEnhancementProbe::Query
         };
-        match crate::terminal_probe::startup(crate::terminal_probe::DEFAULT_TIMEOUT, keyboard_probe)
-        {
+        match crate::terminal_probe::startup(
+            crate::terminal_probe::DEFAULT_TIMEOUT,
+            keyboard_probe,
+            probe_herdr,
+        ) {
             Ok(probe) => {
                 tracing::info!(
                     duration_ms = %started_at.elapsed().as_millis(),
@@ -677,12 +680,7 @@ old = """    #[cfg(unix)]
                     duration_ms = %started_at.elapsed().as_millis(),
                     \"terminal startup probes failed: {err}\"
                 );
-                crate::terminal_probe::StartupProbe {
-                    cursor_position: None,
-                    default_colors: None,
-                    keyboard_enhancement_supported: None,
-                    terminal_app_over_ssh: None,
-                }
+                crate::terminal_probe::StartupProbe::default()
             }
         }
     };
@@ -697,8 +695,11 @@ new = """    #[cfg(all(unix, not(target_os = \"solaris\")))]
         } else {
             StartupKeyboardEnhancementProbe::Query
         };
-        match crate::terminal_probe::startup(crate::terminal_probe::DEFAULT_TIMEOUT, keyboard_probe)
-        {
+        match crate::terminal_probe::startup(
+            crate::terminal_probe::DEFAULT_TIMEOUT,
+            keyboard_probe,
+            probe_herdr,
+        ) {
             Ok(probe) => {
                 tracing::info!(
                     duration_ms = %started_at.elapsed().as_millis(),
@@ -714,22 +715,13 @@ new = """    #[cfg(all(unix, not(target_os = \"solaris\")))]
                     duration_ms = %started_at.elapsed().as_millis(),
                     \"terminal startup probes failed: {err}\"
                 );
-                crate::terminal_probe::StartupProbe {
-                    cursor_position: None,
-                    default_colors: None,
-                    keyboard_enhancement_supported: None,
-                }
+                crate::terminal_probe::StartupProbe::default()
             }
         }
     };
 
-    #[cfg(all(unix, target_os = \"solaris\"))]
-    let startup_probe = crate::terminal_probe::StartupProbe {
-        cursor_position: None,
-        default_colors: None,
-        keyboard_enhancement_supported: None,
-        terminal_app_over_ssh: None,
-    };
+    #[cfg(target_os = \"solaris\")]
+    let startup_probe = crate::terminal_probe::StartupProbe::default();
 """
 if new not in text:
     if old not in text:

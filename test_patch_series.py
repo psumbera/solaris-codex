@@ -87,6 +87,22 @@ class PatchSeriesTests(unittest.TestCase):
         self.assertIn("invalid patch syntax", result.stderr)
         self.assertEqual(self.input.read_text(), "old\ncontext\nwal\n")
 
+    def test_v8_identity_tracks_native_rust_toolchain(self):
+        def identity(version, target):
+            result = subprocess.run(
+                ["bash", "-c", 'source "$1"; RUST_VERSION=$2; '
+                 'RUST_TRIPLE=$3; v8_source_identity',
+                 "identity-test", str(ROOT / "common.sh"), version, target],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        baseline = identity("1.95.0", "x86_64-pc-solaris")
+        self.assertEqual(baseline, identity("1.95.0", "x86_64-pc-solaris"))
+        self.assertNotEqual(baseline, identity("1.99.1", "x86_64-pc-solaris"))
+        self.assertNotEqual(baseline, identity("1.95.0", "different-target"))
+
 
 if __name__ == "__main__":
     unittest.main()

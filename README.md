@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.169.0/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.171.0/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -139,10 +139,14 @@ SQLite, it adds no database locks and works with both local and NFS-backed
 ## Notes
 
 - Rust is downloaded only once into `build/toolchains`.
+- Rust stays pinned to 1.95.0: Rust 1.98 removed Solaris `File` locking
+  ([rust-lang/rust#157509](https://github.com/rust-lang/rust/pull/157509)).
+  Updating the compiler needs a replacement that preserves synchronization;
+  ignoring unsupported locks would break startup and concurrent sessions.
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.169.0`, built from its `codex-rs/` workspace.
+  `rust-v0.171.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
