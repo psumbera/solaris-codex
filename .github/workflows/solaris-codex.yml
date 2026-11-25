@@ -77,6 +77,10 @@ jobs:
               --codex "$WORK/build/install/codex/bin/codex" \
               --catalog "$CODEX_SOURCE/codex-rs/models-manager/models.json" \
               --output "$WORK/build/ci-smoke" --expect-v8
+            python3 smoke-tools.py \
+              --codex "$WORK/build/install/codex/bin/codex" \
+              --catalog "$CODEX_SOURCE/codex-rs/models-manager/models.json" \
+              --output "$WORK/build/ci-smoke-lite" --expect-v8 --responses-lite
             test "`wc -c < build/install/codex/bin/codex`" -lt 1000000000
 
             VERSION=`build/install/codex/bin/codex --version | /usr/bin/nawk '

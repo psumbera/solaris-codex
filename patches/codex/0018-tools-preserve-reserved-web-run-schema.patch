@@ -1,0 +1,316 @@
+From: Solaris Codex maintainers
+Subject: [PATCH] Keep model-visible web.run compatible with its reserved schema
+
+GPT-6.2 advertises experimental literature search, but the service rejects
+that field in the reserved model-visible web.run declaration. This prevents
+all turns, including shell-only requests, on the SPARC direct-tools path.
+The same failure is reproducible on x64 when selecting direct tools.
+
+Normalize only the model-request copy of web.run before code-mode schema
+augmentation. Also normalize historical additional_tools declarations in the
+request copy: a previously rejected declaration otherwise breaks resume even
+with a corrected current schema. Never rewrite saved history, and avoid
+cloning already-compatible catalogs. Preserve ordinary search, model metadata,
+the registered executor, and the full nested Code Mode schema. Do not disable
+web search or change transport, V8, or architecture selection.
+
+Cover both capability values, other tool identities, classic/raw/Responses
+Lite encodings, saved history preservation, and idempotent normalization.
+Update the standalone search scenario and app-server schema expectations.
+
+Related upstream report: https://github.com/openai/codex/issues/59782
+
+diff --git a/codex-rs/app-server/tests/suite/v2/web_search.rs b/codex-rs/app-server/tests/suite/v2/web_search.rs
+--- a/codex-rs/app-server/tests/suite/v2/web_search.rs
++++ b/codex-rs/app-server/tests/suite/v2/web_search.rs
+@@ -392,11 +392,12 @@
+         web_run.pointer("/parameters/properties/time/description"),
+         Some(&json!("Get time for the given UTC offsets."))
+     );
+-    assert_eq!(
++    // The reserved model-visible schema stays compatible even when the
++    // executor supports model-gated literature search.
++    assert!(
+         web_run
+             .pointer("/parameters/properties/literature_search_query")
+-            .is_some(),
+-        literature_search
++            .is_none()
+     );
+     assert!(
+         !has_hosted_web_search(&first_response),
+diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
+--- a/codex-rs/core/src/client.rs
++++ b/codex-rs/core/src/client.rs
+@@ -1197,6 +1197,7 @@
+         include_internal: bool,
+     ) -> Result<ResponsesApiRequest> {
+         let mut input = prompt.get_formatted_input_for_request(model_info);
++        normalize_model_visible_web_run_history(&mut input);
+         if !self.reasoning_effort_override_enabled(model_info) {
+             // Unsupported models and disabled overrides must also accept saved history.
+             // Filter only the request copy; persisted history remains unchanged.
+@@ -3521,6 +3522,44 @@
+     }
+ }
+ 
++fn normalize_model_visible_web_run_history(input: &mut [ResponseItem]) {
++    // Failed or older turns may have persisted the rejected declaration.
++    // Adapt the request copy, never the saved history or nested Code Mode tools.
++    let has_literature = |tool: &serde_json::Value| {
++        tool["type"] == "function"
++            && tool["name"] == "run"
++            && tool
++                .pointer("/parameters/properties/literature_search_query")
++                .is_some()
++    };
++    for item in input {
++        let ResponseItem::AdditionalTools { tools, .. } = item else {
++            continue;
++        };
++        for index in 0..tools.len() {
++            let namespace = &tools[index];
++            if namespace["type"] != "namespace"
++                || namespace["name"] != "web"
++                || !namespace["tools"]
++                    .as_array()
++                    .is_some_and(|tools| tools.iter().any(has_literature))
++            {
++                continue;
++            }
++            if let Some(children) = Arc::make_mut(tools)[index]["tools"].as_array_mut() {
++                for tool in children.iter_mut().filter(|tool| has_literature(tool)) {
++                    if let Some(properties) = tool
++                        .pointer_mut("/parameters/properties")
++                        .and_then(serde_json::Value::as_object_mut)
++                    {
++                        properties.remove("literature_search_query");
++                    }
++                }
++            }
++        }
++    }
++}
++
+ #[cfg(test)]
+ #[path = "client_tests.rs"]
+ mod tests;
+diff --git a/codex-rs/core/src/client_tests.rs b/codex-rs/core/src/client_tests.rs
+--- a/codex-rs/core/src/client_tests.rs
++++ b/codex-rs/core/src/client_tests.rs
+@@ -1,6 +1,52 @@
+ #[path = "client_runtime_auth_tests.rs"]
+ mod runtime_auth_tests;
+ 
++#[test]
++fn model_visible_web_run_history_preserves_saved_and_unrelated_schemas() {
++    let run = serde_json::json!({
++        "type": "function", "name": "run",
++        "parameters": {"type": "object", "properties": {
++            "search_query": {"type": "array"},
++            "open": {"type": "array"},
++            "literature_search_query": {"type": "array"}
++        }}
++    });
++    let mut other = run.clone();
++    other["name"] = serde_json::json!("other");
++    let saved = vec![ResponseItem::AdditionalTools {
++        id: None,
++        role: "developer".to_string(),
++        tools: vec![
++            serde_json::json!({"type": "namespace", "name": "web", "tools": [run, other]}),
++            serde_json::json!({"type": "namespace", "name": "papers", "tools": [run]}),
++            serde_json::json!({"type": "custom", "name": "exec",
++                "description": "Nested tools support literature_search_query"}),
++        ]
++        .into(),
++    }];
++    let original = serde_json::to_value(&saved).unwrap();
++    let mut request = saved.clone();
++    super::normalize_model_visible_web_run_history(&mut request);
++    let mut expected = original.clone();
++    expected[0]["tools"][0]["tools"][0]["parameters"]["properties"]
++        .as_object_mut()
++        .unwrap()
++        .remove("literature_search_query");
++    assert_eq!(serde_json::to_value(&request).unwrap(), expected);
++    assert_eq!(serde_json::to_value(saved).unwrap(), original);
++
++    // Already-compatible history should neither change nor clone the catalog.
++    let compatible = request.clone();
++    super::normalize_model_visible_web_run_history(&mut request);
++    let ResponseItem::AdditionalTools { tools: before, .. } = &compatible[0] else {
++        panic!("expected additional_tools");
++    };
++    let ResponseItem::AdditionalTools { tools: after, .. } = &request[0] else {
++        panic!("expected additional_tools");
++    };
++    assert!(Arc::ptr_eq(before, after));
++}
++
+ use super::AuthRequestTelemetryContext;
+ use super::ModelClient;
+ use super::NonIncrementalReason;
+diff --git a/codex-rs/core/src/tools/spec_plan.rs b/codex-rs/core/src/tools/spec_plan.rs
+--- a/codex-rs/core/src/tools/spec_plan.rs
++++ b/codex-rs/core/src/tools/spec_plan.rs
+@@ -700,6 +700,7 @@
+     code_mode_tool_names: &BTreeMap<String, ToolName>,
+     spec: ToolSpec,
+ ) -> ToolSpec {
++    let spec = model_visible_web_run_spec(spec);
+     let tool_mode = effective_tool_mode(turn_context, model_info);
+     if matches!(tool_mode, ToolMode::CodeMode | ToolMode::CodeModeOnly)
+         && exposure.is_available_in_code_mode()
+@@ -720,6 +721,26 @@
+     }
+ }
+ 
++fn model_visible_web_run_spec(mut spec: ToolSpec) -> ToolSpec {
++    // The reserved model-visible web.run schema does not accept the experimental
++    // literature field, even when model metadata advertises it. Only adapt the
++    // request copy: the registered executor and nested Code Mode schema retain
++    // the capability. Keep ordinary search, open, and other commands unchanged.
++    if let ToolSpec::Namespace(namespace) = &mut spec
++        && namespace.name == "web"
++    {
++        for tool in &mut namespace.tools {
++            if let ResponsesApiNamespaceTool::Function(tool) = tool
++                && tool.name == "run"
++                && let Some(properties) = &mut tool.parameters.properties
++            {
++                properties.remove("literature_search_query");
++            }
++        }
++    }
++    spec
++}
++
+ #[instrument(level = "trace", skip_all)]
+ fn hosted_model_tool_specs(
+     turn_context: &TurnContext,
+diff --git a/codex-rs/core/src/tools/spec_plan_tests.rs b/codex-rs/core/src/tools/spec_plan_tests.rs
+--- a/codex-rs/core/src/tools/spec_plan_tests.rs
++++ b/codex-rs/core/src/tools/spec_plan_tests.rs
+@@ -484,6 +484,67 @@
+         .is_some()
+ }
+ 
++#[test]
++fn model_visible_web_run_preserves_reserved_schema_and_nested_capability() {
++    for supports_literature in [false, true] {
++        for (namespace, name) in [("web", "run"), ("papers", "run"), ("web", "other")] {
++            let mut properties = BTreeMap::from([
++                (
++                    "search_query".to_string(),
++                    codex_tools::JsonSchema::string(None),
++                ),
++                ("open".to_string(), codex_tools::JsonSchema::string(None)),
++            ]);
++            if supports_literature {
++                properties.insert(
++                    "literature_search_query".to_string(),
++                    codex_tools::JsonSchema::string(None),
++                );
++            }
++            let original = ToolSpec::Namespace(codex_tools::ResponsesApiNamespace {
++                name: namespace.to_string(),
++                description: "Search tools".to_string(),
++                tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
++                    name: name.to_string(),
++                    description: "Search".to_string(),
++                    strict: false,
++                    defer_loading: None,
++                    parameters: codex_tools::JsonSchema::object(properties, None, None),
++                    output_schema: None,
++                })],
++            });
++            let visible = super::model_visible_web_run_spec(original.clone());
++            let mut expected = serde_json::to_value(&original).unwrap();
++            if namespace == "web" && name == "run" {
++                expected["tools"][0]["parameters"]["properties"]
++                    .as_object_mut()
++                    .unwrap()
++                    .remove("literature_search_query");
++            }
++            assert_eq!(serde_json::to_value(&visible).unwrap(), expected);
++            for tools in [
++                codex_tools::create_tools_json_for_responses_api(&[visible.clone()]).unwrap(),
++                codex_tools::create_tools_json_for_responses_lite(&[visible.clone()]).unwrap(),
++                serde_json::from_str::<Vec<serde_json::Value>>(
++                    codex_tools::create_tools_raw_json_for_responses_api(&[visible])
++                        .unwrap()
++                        .get(),
++                )
++                .unwrap(),
++            ] {
++                assert_eq!(tools, vec![expected.clone()]);
++            }
++            assert_eq!(
++                serde_json::to_value(original).unwrap()["tools"][0]["parameters"]["properties"]
++                    .get("literature_search_query")
++                    .is_some(),
++                supports_literature,
++                "the executor/Code Mode schema must retain its capability",
++            );
++        }
++    }
++}
++
+ fn has_windows_shell_guidance(spec: &ToolSpec) -> bool {
+     let ToolSpec::Function(tool) = spec else {
+         return false;
+diff --git a/codex-rs/core/tests/suite/scenarios_web_search.rs b/codex-rs/core/tests/suite/scenarios_web_search.rs
+--- a/codex-rs/core/tests/suite/scenarios_web_search.rs
++++ b/codex-rs/core/tests/suite/scenarios_web_search.rs
+@@ -97,6 +97,13 @@
+         .get("parameters")
+         .expect("web.run parameters")
+         .clone();
++    // The reserved model-visible declaration excludes the experimental field;
++    // the executor can still handle it for a model advertising the capability.
++    assert!(
++        parameters["properties"]
++            .get("literature_search_query")
++            .is_none()
++    );
+     parameters.sort_all_objects();
+     insta::assert_snapshot!(
+         "literature_search_web_run_schema",
+diff --git a/codex-rs/core/tests/suite/snapshots/all__suite__scenarios__web_search__literature_search_web_run_schema.snap b/codex-rs/core/tests/suite/snapshots/all__suite__scenarios__web_search__literature_search_web_run_schema.snap
+--- a/codex-rs/core/tests/suite/snapshots/all__suite__scenarios__web_search__literature_search_web_run_schema.snap
++++ b/codex-rs/core/tests/suite/snapshots/all__suite__scenarios__web_search__literature_search_web_run_schema.snap
+@@ -104,33 +104,6 @@
+       },
+       "type": "array"
+     },
+-    "literature_search_query": {
+-      "description": "Search for scientific papers. Open relevant papers and cite the primary sources you use.",
+-      "items": {
+-        "properties": {
+-          "domains": {
+-            "description": "Whether to filter by a specific list of domains.",
+-            "items": {
+-              "type": "string"
+-            },
+-            "type": "array"
+-          },
+-          "q": {
+-            "description": "Search query.",
+-            "type": "string"
+-          },
+-          "recency": {
+-            "description": "Whether to filter by recency, as a number of recent days.",
+-            "type": "integer"
+-          }
+-        },
+-        "required": [
+-          "q"
+-        ],
+-        "type": "object"
+-      },
+-      "type": "array"
+-    },
+     "open": {
+       "description": "Open pages by reference id or URL.",
+       "items": {

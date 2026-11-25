@@ -89,6 +89,13 @@ credentials and disables unrelated plugin downloads. It runs fixed commands
 in its scratch directory with sandboxing disabled, so it does not validate
 Solaris sandbox enforcement.
 
+The fixture also advertises experimental literature search and checks that
+direct `web.run` keeps its reserved schema while nested Code Mode retains the
+capability. Add `--responses-lite` to repeat the checks using `additional_tools`
+declarations rather than the classic Responses `tools` field. This also checks
+resuming a session with a legacy rejected declaration, without rewriting its
+saved history. CI runs both request encodings.
+
 To test the final installed binary's SQLite startup on Solaris NFS, add
 `--nfs-root "$HOME/.codex-testing"` (an existing NFS directory) and use
 a new local output directory name. The fixture creates isolated NFS
@@ -197,6 +204,15 @@ patch series under `patches/codex/` before vendoring:
 - `0017-pty-test-check-closed-descriptor-after-shell-exec.patch` checks excluded
   descriptors after shell-private descriptors have been closed by exec,
   avoiding false failures from Solaris `/dev/fd` and shell behavior.
+- `0018-tools-preserve-reserved-web-run-schema.patch` omits experimental
+  literature search from the reserved model-visible `web.run` declaration.
+  Without this compatibility adjustment, GPT-6.2 rejects every turn on the
+  SPARC direct-tools path. Ordinary web search remains available, and nested
+  Code Mode tools retain their complete schema and model-gated capabilities.
+  Previously saved declarations are normalized only in outgoing requests,
+  allowing failed sessions to resume without rewriting their saved history.
+  The same error can occur on x64 with direct tools; see upstream
+  [issue #59782](https://github.com/openai/codex/issues/59782).
 
 Before vendoring, `patch_tui_solaris_terminal_input()` keeps the TUI off
 terminal capability probes that stalled some Solaris PTYs, replaces the

@@ -27,6 +27,14 @@ def specs(tools, namespace=None):
             yield namespace, tool
 
 
+def declarations_from_request(body):
+    declarations = list(body.get("tools") or [])
+    for item in body.get("input", []):
+        if item.get("type") == "additional_tools":
+            declarations.extend(item["tools"])
+    return declarations
+
+
 def seed_nfs_state(root, config_home, mode):
     """Exercise fresh state, a WAL snapshot, and data committed only to WAL."""
     if mode == "direct":
@@ -92,11 +100,18 @@ def run_case(args, mode):
     catalog = json.loads(args.catalog.read_text())
     model = copy.deepcopy(catalog["models"][0])
     model.update(slug="solaris-smoke", display_name="Solaris smoke",
-                 tool_mode=mode, prefer_websockets=False, use_responses_lite=False)
+                 tool_mode=mode, prefer_websockets=False,
+                 use_responses_lite=args.responses_lite,
+                 web_search_provider="standalone")
+    capability = "literature_search_query"
+    if capability not in model.setdefault("experimental_supported_tools", []):
+        model["experimental_supported_tools"].append(capability)
     catalog_path = root / "models.json"
     catalog_path.write_text(json.dumps({"models": [model]}))
     requests = []
+    search_requests = []
     failures = []
+    legacy_marker = "LEGACY_WEB_SCHEMA_FIXTURE"
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -108,6 +123,16 @@ def run_case(args, mode):
                 if self.headers.get("Content-Encoding") == "gzip":
                     raw = zlib.decompress(raw, 16 + zlib.MAX_WBITS)
                 body = json.loads(raw)
+                if self.path.endswith("/alpha/search"):
+                    assert body["commands"][capability] == [{"q": "Solaris smoke paper"}]
+                    search_requests.append(body)
+                    data = b'{"output":"V8_LITERATURE_OK"}'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if not self.path.endswith("/responses"):
                     data = b'{"turns":[]}'
                     self.send_response(200)
@@ -119,9 +144,21 @@ def run_case(args, mode):
                 requests.append(body)
                 index = len(requests)
                 (root / f"request-{index}.json").write_text(json.dumps(body, indent=2))
-                available = list(specs(body.get("tools", [])))
+                assert bool(body.get("tools")) != args.responses_lite, "wrong request encoding"
+                available = list(specs(declarations_from_request(body)))
+                if index == 4 and mode == "direct" and args.responses_lite:
+                    assert any(legacy_marker in tool.get("description", "")
+                               for tool in declarations_from_request(body)), \
+                        "legacy declaration was not included in the resumed request"
                 names = {tool.get("name") for _, tool in available}
                 use_v8 = args.expect_v8 and mode != "direct"
+                web_run = [tool for ns, tool in available
+                           if ns == "web" and tool.get("name") == "run"]
+                assert bool(web_run) == (not use_v8 or mode != "code_mode_only")
+                for tool in web_run:
+                    properties = tool["parameters"]["properties"]
+                    assert "search_query" in properties and "open" in properties
+                    assert capability not in properties, "reserved web.run schema mismatch"
                 if use_v8:
                     assert "exec" in names, names
                 else:
@@ -138,6 +175,8 @@ def run_case(args, mode):
                             "catch (error) { overflow = error instanceof RangeError; }"
                             "if (!overflow) throw new Error('missing stack overflow guard');"
                             "text('V8_STACK_OK');"
+                            "text(await tools.web__run({literature_search_query:"
+                            "[{q:'Solaris smoke paper'}]}));"
                         )
                         item = dict(type="custom_tool_call", call_id="smoke-call", name="exec", input=payload)
                     else:
@@ -160,6 +199,7 @@ def run_case(args, mode):
                     assert expected in json.dumps(outputs), outputs
                     if use_v8:
                         assert "V8_STACK_OK" in json.dumps(outputs), outputs
+                        assert "V8_LITERATURE_OK" in json.dumps(outputs), outputs
                     namespace = None
                     item = dict(type="message", role="assistant", id="smoke-answer", content=[dict(type="output_text", text="SMOKE_COMPLETE")])
                 if namespace:
@@ -189,6 +229,9 @@ def run_case(args, mode):
         "model_providers.solaris_smoke.base_url": f"http://127.0.0.1:{server.server_port}/v1",
         "model_providers.solaris_smoke.wire_api": "responses",
         "model_providers.solaris_smoke.requires_openai_auth": False,
+        "model_providers.solaris_smoke.supports_standalone_web_search": True,
+        "model_providers.solaris_smoke.request_max_retries": 0,
+        "model_providers.solaris_smoke.stream_max_retries": 0,
         "model_catalog_json": str(catalog_path),
         "features.code_mode": mode != "direct",
         "features.code_mode_only": mode == "code_mode_only",
@@ -196,6 +239,8 @@ def run_case(args, mode):
         "features.code_mode_prewarm": True,
         "features.code_mode_host.disable_in_process_fallback": True,
         "features.shell_snapshot": False,
+        "features.standalone_web_search": True,
+        "web_search": "cached",
         # Keep unrelated public plugin downloads out of this local fixture.
         "features.plugins": False,
         "features.enable_request_compression": False,
@@ -216,11 +261,43 @@ def run_case(args, mode):
         result = subprocess.run(command, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180)
         (root / "stdout.log").write_text(result.stdout)
         (root / "stderr.log").write_text(result.stderr)
-        assert result.returncode == 0, result.stderr[-3000:]
         assert not failures, failures
+        assert result.returncode == 0, result.stderr[-3000:]
         assert "SMOKE_COMPLETE" in result.stdout, result.stdout[-3000:]
         assert len(requests) == (2 if args.expect_v8 and mode != "direct" else 3), len(requests)
+        assert len(search_requests) == int(args.expect_v8 and mode != "direct")
         assert list(config_home.rglob("rollout-*.jsonl")), "missing persisted session"
+        if mode == "direct" and args.responses_lite:
+            # A failed older turn can retain the rejected schema in history.
+            # Correcting only the current declaration must not pass this test.
+            rollout, = config_home.rglob("rollout-*.jsonl")
+            legacy = copy.deepcopy(next(
+                tool for tool in declarations_from_request(requests[0])
+                if tool.get("name") == "web"
+            ))
+            legacy["description"] += " " + legacy_marker
+            properties = legacy["tools"][0]["parameters"]["properties"]
+            properties[capability] = copy.deepcopy(properties["search_query"])
+            last = json.loads(rollout.read_text().splitlines()[-1])
+            item = dict(timestamp=last["timestamp"], ordinal=last["ordinal"] + 1,
+                        type="response_item",
+                        payload=dict(type="additional_tools", role="developer", tools=[legacy]))
+            with rollout.open("a") as stream:
+                stream.write(json.dumps(item) + "\n")
+            saved = rollout.read_bytes()
+            resumed = subprocess.run(
+                command[:-1] + ["resume", "--last", "Check the saved smoke result."],
+                env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                text=True, timeout=180,
+            )
+            (root / "resume-stdout.log").write_text(resumed.stdout)
+            (root / "resume-stderr.log").write_text(resumed.stderr)
+            assert not failures, failures
+            assert resumed.returncode == 0, resumed.stderr[-3000:]
+            assert "SMOKE_COMPLETE" in resumed.stdout, resumed.stdout[-3000:]
+            assert len(requests) == 4, len(requests)
+            assert rollout.read_bytes().startswith(saved), "saved history was rewritten"
+            print("PASS resumed legacy web.run schema; saved history preserved", flush=True)
         if args.nfs_root:
             verify_nfs_state(config_home, seeded)
             print(f"PASS NFS {mode}: {seeded}, migrations, DELETE mode", flush=True)
@@ -236,6 +313,8 @@ if __name__ == "__main__":
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expect-v8", action="store_true")
+    parser.add_argument("--responses-lite", action="store_true",
+                        help="exercise additional_tools request declarations")
     parser.add_argument("--nfs-root", type=Path,
                         help="existing Solaris NFS directory for isolated test CODEX_HOME trees")
     options = parser.parse_args()
