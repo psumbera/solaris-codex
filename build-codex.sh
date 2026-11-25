@@ -84,7 +84,7 @@ replacements = {
         "    crate::mxc_engine::run::log_policy_hash(request, logger);",
         '    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]\n'
         "    crate::mxc_engine::run::log_policy_hash(request, logger);",
-        2,
+        3,
     )],
     "src/core/mxc_common/telemetry/correlation_state.rs": [(
         '#[cfg(unix)]\nfn try_lock_file(file: &fs::File) -> bool {',

@@ -28,7 +28,7 @@ Related upstream issue: https://github.com/openai/codex/issues/30957
 diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
 --- a/codex-rs/state/src/sqlite.rs
 +++ b/codex-rs/state/src/sqlite.rs
-@@ -213,7 +213,9 @@
+@@ -214,7 +214,9 @@
              local_logs_dir: None,
              is_nfs: Arc::new(OnceCell::new()),
              logs_is_nfs: Arc::new(OnceCell::new()),
@@ -39,7 +39,7 @@ diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
              quick_check_manager: SqliteQuickCheckManager::new(),
          }
      }
-@@ -230,6 +232,7 @@
+@@ -231,6 +233,7 @@
              sqlite_home,
              /*enforce_delete_on_nfs*/ false,
          )
@@ -50,11 +50,10 @@ diff --git a/codex-rs/state/src/sqlite.rs b/codex-rs/state/src/sqlite.rs
 diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_tests.rs
 --- a/codex-rs/state/src/sqlite_tests.rs
 +++ b/codex-rs/state/src/sqlite_tests.rs
-@@ -7,6 +7,14 @@
- use sqlx::sqlite::SqliteConnectOptions;
+@@ -8,6 +8,14 @@
  use sqlx::sqlite::SqliteJournalMode;
  use sqlx::sqlite::SqlitePoolOptions;
-+
+ 
 +#[cfg(target_os = "solaris")]
 +#[test]
 +fn solaris_enforces_nfs_conversion_without_managed_configuration() {
@@ -62,10 +61,11 @@ diff --git a/codex-rs/state/src/sqlite_tests.rs b/codex-rs/state/src/sqlite_test
 +    let sqlite = SqliteConfig::from_sqlite_home_with_nfs_enforcement(home.as_path().abs(), false);
 +    assert!(sqlite.enforce_delete_on_nfs);
 +}
- 
++
  #[tokio::test]
  async fn current_schema_opens_while_another_connection_has_writer_reservation() -> anyhow::Result<()>
-@@ -59,6 +67,10 @@
+ {
+@@ -127,6 +135,10 @@
  
  #[cfg(unix)]
  #[tokio::test]

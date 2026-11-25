@@ -12,16 +12,16 @@ larger than a typical pipe buffer.
 diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
 --- a/codex-rs/exec-server/src/fs_sandbox.rs
 +++ b/codex-rs/exec-server/src/fs_sandbox.rs
-@@ -16,7 +16,6 @@
+@@ -17,7 +17,6 @@
  use codex_utils_pty::SpawnFallback;
  #[cfg(any(windows, test))]
  use tokio::io::AsyncBufReadExt;
 -#[cfg(any(windows, test))]
  use tokio::io::AsyncReadExt;
  use tokio::io::AsyncWriteExt;
-
-@@ -310,9 +309,35 @@
-
+ 
+@@ -300,9 +299,35 @@
+ 
  #[cfg(not(windows))]
  pub(crate) async fn wait_for_helper_output(
 -    child: Child,
@@ -58,21 +58,21 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
      if !output.status.success() {
          return Err(internal_error(format!(
              "fs sandbox helper failed with status {status}: {stderr}",
-@@ -352,6 +377,10 @@
+@@ -345,6 +370,10 @@
+     internal_error(err.to_string())
  }
-
- pub(crate) fn io_error(err: std::io::Error) -> JSONRPCErrorError {
+ 
++fn join_error(err: tokio::task::JoinError) -> JSONRPCErrorError {
 +    internal_error(err.to_string())
 +}
 +
-+fn join_error(err: tokio::task::JoinError) -> JSONRPCErrorError {
-     internal_error(err.to_string())
- }
-
-@@ -826,6 +855,60 @@
+ fn json_error(err: serde_json::Error) -> JSONRPCErrorError {
+     internal_error(format!(
+         "failed to encode or decode fs sandbox helper message: {err}"
+@@ -816,6 +845,60 @@
          }
      }
-
+ 
 +    #[cfg(unix)]
 +    #[tokio::test]
 +    async fn run_command_drains_large_helper_stdout_before_waiting() {

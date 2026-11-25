@@ -42,12 +42,10 @@ diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server
  fn try_lock_file(file: &fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -679,6 +679,35 @@
-         return Ok(false);
-     }
+@@ -681,6 +681,35 @@
      Err(err).context("failed to lock pid reservation")
-+}
-+
+ }
+ 
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;
@@ -75,9 +73,11 @@ diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server
 +        }
 +        _ => Err(err),
 +    }
- }
- 
++}
++
  #[cfg(not(any(unix, windows)))]
+ fn try_lock_file(_file: &fs::File) -> Result<bool> {
+     bail!("pid-managed app-server startup is unsupported on this platform")
 @@ -714,14 +743,9 @@
      }
      #[cfg(unix)]
@@ -132,7 +132,7 @@ diff --git a/codex-rs/app-server-daemon/src/backend/pid.rs b/codex-rs/app-server
 diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/src/lib.rs
 --- a/codex-rs/app-server-daemon/src/lib.rs
 +++ b/codex-rs/app-server-daemon/src/lib.rs
-@@ -1237,7 +1237,7 @@
+@@ -1262,7 +1262,7 @@
      }
  }
  
@@ -141,12 +141,10 @@ diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/
  fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
      use std::os::fd::AsRawFd;
  
-@@ -1251,6 +1251,35 @@
-         return Ok(false);
-     }
+@@ -1278,6 +1278,35 @@
      Err(err).context("failed to lock daemon operation")
-+}
-+
+ }
+ 
 +#[cfg(target_os = "solaris")]
 +fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
 +    use std::os::fd::AsRawFd;
@@ -174,6 +172,8 @@ diff --git a/codex-rs/app-server-daemon/src/lib.rs b/codex-rs/app-server-daemon/
 +        }
 +        _ => Err(err),
 +    }
- }
- 
++}
++
  #[cfg(not(any(unix, windows)))]
+ fn try_lock_file(_file: &tokio::fs::File) -> Result<bool> {
+     Ok(true)

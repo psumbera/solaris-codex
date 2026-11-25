@@ -78,7 +78,7 @@ not installed. To run the local integration fixture on either architecture:
 ```sh
 python3.13 smoke-tools.py \
   --codex "$PWD/build/install/codex/bin/codex" \
-  --catalog "$PWD/build/src/codex-rust-v0.171.0/codex-rs/models-manager/models.json" \
+  --catalog "$PWD/build/src/codex-rust-v0.172.0/codex-rs/models-manager/models.json" \
   --output "$PWD/build/smoke-results"
 ```
 
@@ -153,7 +153,7 @@ SQLite, it adds no database locks and works with both local and NFS-backed
 - The wrapper selects the official Rust standalone installer for
   `x86_64-pc-solaris` or `sparcv9-sun-solaris` from the native host architecture.
 - The pinned Codex source is the upstream `openai/codex` release tag
-  `rust-v0.171.0`, built from its `codex-rs/` workspace.
+  `rust-v0.172.0`, built from its `codex-rs/` workspace.
 - Set `SOLARIS_CODEX_PROXY_SETUP=/path/to/proxy.sh` if your host needs an
   environment hook before downloads.
 - The codex build clears inherited Solaris `LD_*` hardening variables because
@@ -188,6 +188,10 @@ patch series under `patches/codex/` before vendoring:
   honor `NO_PROXY`/`no_proxy` without reqwest system proxy autodetection.
 - `0010-exec-server-drain-fs-helper-output-concurrently.patch` keeps large
   filesystem-helper responses from blocking on a full stdout pipe.
+- `0012-sandbox-filesystem-helpers-with-solaris-ppriv.patch` uses the shared
+  platform launcher for Solaris filesystem helpers and checks every path in
+  metadata batches. General commands retain their existing approval handling;
+  unsupported managed-network enforcement is rejected.
 - `0014-features-disable-daemon-auto-start-on-solaris.patch` keeps ordinary
   TUI startup in embedded mode because this distribution does not install the
   complete standalone package tree required for daemon bootstrap.

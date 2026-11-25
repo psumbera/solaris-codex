@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-SOLARIS_CODEX_VERSION=0.171.0
+SOLARIS_CODEX_VERSION=0.172.0
 # Rust >= 1.98 returns Unsupported for Solaris std::fs::File locks.
 # Keep the working toolchain until a compatible locking implementation lands.
 RUST_VERSION=1.95.0

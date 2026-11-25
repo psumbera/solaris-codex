@@ -10,10 +10,14 @@ Reject protected metadata components explicitly, preserving .git, .codex, and
 the sandbox. Keep general command execution on the existing approval path until
 its richer policy can be represented without weakening the sandbox.
 
+Adapt the Solaris launcher to the shared SandboxBackend interface. Authorize
+all paths in metadata batches and reject managed networking this backend
+cannot enforce; keep general command execution on its existing approval path.
+
 diff --git a/codex-rs/exec-server-protocol/src/protocol.rs b/codex-rs/exec-server-protocol/src/protocol.rs
 --- a/codex-rs/exec-server-protocol/src/protocol.rs
 +++ b/codex-rs/exec-server-protocol/src/protocol.rs
-@@ -548,6 +548,7 @@
+@@ -553,6 +553,7 @@
      None,
      MacosSeatbelt,
      LinuxSeccomp,
@@ -24,9 +28,9 @@ diff --git a/codex-rs/exec-server-protocol/src/protocol.rs b/codex-rs/exec-serve
 diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/fs_sandbox.rs
 --- a/codex-rs/exec-server/src/fs_sandbox.rs
 +++ b/codex-rs/exec-server/src/fs_sandbox.rs
-@@ -3,10 +3,24 @@
+@@ -3,11 +3,25 @@
  use std::time::Duration;
-
+ 
  use codex_exec_server_protocol::JSONRPCErrorError;
 +#[cfg(target_os = "solaris")]
 +use codex_protocol::models::PermissionProfile;
@@ -42,6 +46,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +use codex_protocol::permissions::is_protected_metadata_name;
  use codex_sandboxing::SandboxCommand;
  use codex_sandboxing::SandboxExecRequest;
+ use codex_sandboxing::SandboxExecutables;
  use codex_sandboxing::SandboxManager;
  use codex_sandboxing::SandboxTransformRequest;
 +#[cfg(target_os = "solaris")]
@@ -49,7 +54,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  use codex_utils_path_uri::PathUri;
  use codex_utils_pty::Child;
  use codex_utils_pty::ChildStdin;
-@@ -63,7 +77,7 @@
+@@ -64,7 +78,7 @@
          sandbox: &FileSystemSandboxContext,
          request: FsHelperRequest,
      ) -> Result<FsHelperPayload, JSONRPCErrorError> {
@@ -58,7 +63,7 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
          let request_json = serde_json::to_vec(&request).map_err(json_error)?;
          run_command(command, request_json).await
      }
-@@ -71,10 +85,19 @@
+@@ -72,20 +86,30 @@
      pub(crate) async fn prepare_command(
          &self,
          sandbox: &FileSystemSandboxContext,
@@ -68,18 +73,18 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +        let command = self.sandbox_command_inner(sandbox, request)?;
          crate::run_integrity_checks((&command).into()).await;
          Ok(command)
-+    }
-+
+     }
+ 
 +    #[cfg(test)]
 +    fn sandbox_command(
 +        &self,
 +        sandbox: &FileSystemSandboxContext,
 +    ) -> Result<SandboxExecRequest, JSONRPCErrorError> {
 +        self.sandbox_command_inner(sandbox, None)
-     }
-
++    }
++
      #[tracing::instrument(
-@@ -82,9 +105,10 @@
+         name = "fs.sandbox_prepare",
          skip_all,
          fields(permission_entries = tracing::field::Empty)
      )]
@@ -90,8 +95,8 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +        request: Option<&FsHelperRequest>,
      ) -> Result<SandboxExecRequest, JSONRPCErrorError> {
          let helper = &self.runtime_paths.codex_self_exe;
-         let mut helper_readable_paths = Vec::new();
-@@ -122,10 +146,38 @@
+         let sandbox_manager = SandboxManager::for_file_system_helpers()
+@@ -113,10 +137,38 @@
              managed_network: None,
              additional_permissions: None,
          };
@@ -129,12 +134,12 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 -                permissions: &sandbox.permissions,
 +                permissions,
                  workspace_roots: Some(&sandbox.workspace_roots),
-                 runtime_readable_paths: Some(&helper_readable_paths),
                  selection,
-@@ -155,6 +207,98 @@
+                 network: Default::default(),
+@@ -145,6 +197,103 @@
      }
  }
-
+ 
 +#[cfg(target_os = "solaris")]
 +fn solaris_helper_file_system_policy(
 +    original: &FileSystemSandboxPolicy,
@@ -206,6 +211,11 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +        FsHelperRequest::GetMetadata(params) => {
 +            add_path(&params.path, FileSystemAccessMode::Read)?;
 +        }
++        FsHelperRequest::GetMetadataBatch(params) => {
++            for path in &params.paths {
++                add_path(path, FileSystemAccessMode::Read)?;
++            }
++        }
 +        FsHelperRequest::Canonicalize(params) => {
 +            add_path(&params.path, FileSystemAccessMode::Read)?;
 +        }
@@ -230,11 +240,10 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
  fn helper_env() -> HashMap<String, String> {
      helper_env_from_vars(std::env::vars_os())
  }
-@@ -417,6 +561,110 @@
-     use super::helper_env;
+@@ -408,6 +557,146 @@
      use super::helper_env_from_vars;
      use super::helper_env_key_is_allowed;
-+
+ 
 +    #[cfg(target_os = "solaris")]
 +    #[test]
 +    fn solaris_helper_authorizes_bound_workspace_roots() {
@@ -273,6 +282,42 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +                    roots.len()
 +                );
 +            }
++        }
++    }
++
++    #[cfg(target_os = "solaris")]
++    #[test]
++    fn solaris_helper_metadata_batch_authorizes_every_path() {
++        let temp = tempfile::tempdir().expect("workspace");
++        let cwd = AbsolutePathBuf::from_absolute_path(temp.path()).expect("absolute cwd");
++        let allowed = cwd.join("allowed");
++        let denied = cwd.join("denied");
++        let policy = restricted_policy(vec![path_entry(
++            allowed.clone(),
++            FileSystemAccessMode::Read,
++        )]);
++        for (paths, expected) in [
++            (vec![PathUri::from_abs_path(&allowed)], true),
++            (
++                vec![
++                    PathUri::from_abs_path(&allowed),
++                    PathUri::from_abs_path(&denied),
++                ],
++                false,
++            ),
++        ] {
++            let request = super::FsHelperRequest::GetMetadataBatch(
++                crate::protocol::FsGetMetadataBatchParams {
++                    paths,
++                    follow_symlinks: None,
++                    sandbox: None,
++                },
++            );
++            assert_eq!(
++                super::solaris_helper_file_system_policy(&policy, &request, cwd.as_path(), &[])
++                    .is_ok(),
++                expected,
++            );
 +        }
 +    }
 +
@@ -338,9 +383,10 @@ diff --git a/codex-rs/exec-server/src/fs_sandbox.rs b/codex-rs/exec-server/src/f
 +            )
 +        );
 +    }
-
++
      #[test]
      fn helper_env_carries_only_allowlisted_runtime_vars() {
+         let env = helper_env();
 diff --git a/codex-rs/exec-server/src/local_process.rs b/codex-rs/exec-server/src/local_process.rs
 --- a/codex-rs/exec-server/src/local_process.rs
 +++ b/codex-rs/exec-server/src/local_process.rs
@@ -370,7 +416,7 @@ diff --git a/codex-rs/exec-server/src/process.rs b/codex-rs/exec-server/src/proc
 diff --git a/codex-rs/exec-server/src/sandboxed_file_system.rs b/codex-rs/exec-server/src/sandboxed_file_system.rs
 --- a/codex-rs/exec-server/src/sandboxed_file_system.rs
 +++ b/codex-rs/exec-server/src/sandboxed_file_system.rs
-@@ -26,6 +26,7 @@
+@@ -27,6 +27,7 @@
  use crate::WalkOutcome;
  use crate::WriteFileOptions;
  use crate::discover_v2::capability_locations::CapabilityLocation;
@@ -378,7 +424,7 @@ diff --git a/codex-rs/exec-server/src/sandboxed_file_system.rs b/codex-rs/exec-s
  use crate::fs_helper::FsHelperPayload;
  use crate::fs_helper::FsHelperRequest;
  use crate::fs_sandbox::FileSystemSandboxRunner;
-@@ -91,7 +92,15 @@
+@@ -93,7 +94,15 @@
          validate_native_path(path)?;
          let command = self
              .sandbox_runner
@@ -426,7 +472,7 @@ diff --git a/codex-rs/sandboxing/src/lib.rs b/codex-rs/sandboxing/src/lib.rs
  mod spawn;
  mod terminal_queries;
  mod violation;
-@@ -111,6 +113,14 @@
+@@ -113,6 +115,14 @@
              SandboxTransformError::WindowsSandboxPreparation(message) => {
                  CodexErr::UnsupportedOperation(message)
              }
@@ -444,18 +490,7 @@ diff --git a/codex-rs/sandboxing/src/lib.rs b/codex-rs/sandboxing/src/lib.rs
 diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manager.rs
 --- a/codex-rs/sandboxing/src/manager.rs
 +++ b/codex-rs/sandboxing/src/manager.rs
-@@ -15,6 +15,10 @@
- use crate::policy_transforms::should_require_platform_sandbox;
- #[cfg(target_os = "macos")]
- use crate::seatbelt::MacosSeatbeltProfile;
-+#[cfg(target_os = "solaris")]
-+use crate::solaris::SOLARIS_PATH_TO_PPRIV_EXECUTABLE;
-+#[cfg(target_os = "solaris")]
-+use crate::solaris::create_solaris_privileges_command_args;
- use codex_network_proxy::ManagedNetworkSandboxContext;
- use codex_network_proxy::NetworkProxy;
- use codex_protocol::config_types::WindowsSandboxLevel;
-@@ -253,6 +257,10 @@
+@@ -243,6 +243,10 @@
      SeatbeltUnavailable,
      #[cfg(target_os = "windows")]
      WindowsSandboxPreparation(String),
@@ -464,13 +499,12 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
 +    #[cfg(not(target_os = "solaris"))]
 +    SolarisSandboxUnavailable,
  }
-
+ 
  impl std::fmt::Display for SandboxTransformError {
-@@ -292,6 +300,17 @@
-             #[cfg(target_os = "windows")]
+@@ -283,6 +287,17 @@
              Self::WindowsSandboxPreparation(err) => {
                  write!(f, "failed to prepare Windows sandbox: {err}")
-+            }
+             }
 +            #[cfg(target_os = "solaris")]
 +            Self::SolarisSandboxPreparation(err) => {
 +                write!(f, "failed to prepare Solaris sandbox wrapper: {err}")
@@ -481,10 +515,11 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
 +                    f,
 +                    "Solaris extended privilege sandbox is only available on Solaris"
 +                )
-             }
++            }
          }
      }
-@@ -314,6 +333,10 @@
+ }
+@@ -304,6 +319,10 @@
              Self::SeatbeltUnavailable => None,
              #[cfg(target_os = "windows")]
              Self::WindowsSandboxPreparation(_) => None,
@@ -495,10 +530,10 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
          }
      }
  }
-@@ -390,6 +413,33 @@
+@@ -390,6 +409,31 @@
          self
      }
-
+ 
 +    fn platform_sandbox(&self, windows_sandbox_enabled: bool) -> Option<SandboxType> {
 +        #[cfg(target_os = "solaris")]
 +        if matches!(self.operation, SandboxOperation::FileSystemHelper) {
@@ -507,9 +542,7 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
 +        get_platform_sandbox(windows_sandbox_enabled)
 +    }
 +
-+    /// Bind request authorization exactly as helper launch does, before Solaris
-+    /// narrows the policy to the request paths. Runtime binary access is added
-+    /// later, so it cannot authorize an otherwise forbidden request path.
++    /// Resolve request authorization before adding runtime executable grants.
 +    #[cfg(target_os = "solaris")]
 +    pub fn resolve_file_system_helper_permissions(
 +        permissions: &PermissionProfile,
@@ -529,7 +562,7 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
      pub fn select_initial(
          &self,
          permission_profile: &PermissionProfile,
-@@ -406,7 +456,8 @@
+@@ -406,7 +450,8 @@
          if cfg!(windows) && windows_sandbox_type == SandboxType::WindowsMxc {
              return SandboxType::WindowsMxc;
          }
@@ -537,11 +570,11 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
 +        self.platform_sandbox(windows_sandbox_type != SandboxType::None)
 +            .unwrap_or(SandboxType::None)
      }
-
+ 
      /// Returns whether the request needs a sandbox, independently of whether
-@@ -503,7 +554,9 @@
+@@ -535,7 +580,9 @@
              SandboxType::WindowsRestrictedToken if is_file_system_helper => {
-                 request.sandbox_exe.map(Path::as_os_str)
+                 sandbox_exe.map(Path::as_os_str)
              }
 -            SandboxType::MacosSeatbelt | SandboxType::WindowsRestrictedToken => None,
 +            SandboxType::MacosSeatbelt
@@ -550,39 +583,34 @@ diff --git a/codex-rs/sandboxing/src/manager.rs b/codex-rs/sandboxing/src/manage
          }
          .filter(|path| path.to_str().is_none())
          .map(OsStr::to_owned);
-@@ -684,6 +737,24 @@
-                     route.as_ref(),
-                 )?;
-             }
+@@ -611,6 +658,20 @@
+             },
+             #[cfg(not(target_os = "macos"))]
+             SandboxType::MacosSeatbelt => return Err(SandboxTransformError::SeatbeltUnavailable),
 +            #[cfg(target_os = "solaris")]
 +            SandboxType::SolarisExtendedPrivileges => {
-+                let pending = pending?;
-+                exec.permission_profile = pending.effective_permission_profile;
-+                let args = create_solaris_privileges_command_args(
-+                    std::mem::take(&mut exec.command),
-+                    &exec.permission_profile,
-+                    pending.native_sandbox_policy_cwd.as_path(),
-+                )
-+                .map_err(SandboxTransformError::SolarisSandboxPreparation)?;
-+                exec.command = std::iter::once(SOLARIS_PATH_TO_PPRIV_EXECUTABLE.to_owned())
-+                    .chain(args)
-+                    .collect();
++                if enforce_managed_network {
++                    return Err(SandboxTransformError::InvalidPolicy(io::Error::new(
++                        io::ErrorKind::Unsupported,
++                        "Solaris extended privileges cannot enforce managed networking",
++                    )));
++                }
++                &mut crate::solaris::Solaris
 +            }
 +            #[cfg(not(target_os = "solaris"))]
 +            SandboxType::SolarisExtendedPrivileges => {
 +                return Err(SandboxTransformError::SolarisSandboxUnavailable);
 +            }
-             SandboxType::WindowsRestrictedToken => {
-                 let pending = pending?;
-                 exec.permission_profile = pending.effective_permission_profile;
+             SandboxType::WindowsMxc => {
+                 if !codex_mxc_sandbox::is_available() {
+                     return Err(SandboxTransformError::WindowsMxcPreparation(
 diff --git a/codex-rs/sandboxing/src/manager_tests.rs b/codex-rs/sandboxing/src/manager_tests.rs
 --- a/codex-rs/sandboxing/src/manager_tests.rs
 +++ b/codex-rs/sandboxing/src/manager_tests.rs
-@@ -24,6 +24,100 @@
- use pretty_assertions::assert_eq;
+@@ -26,6 +26,133 @@
  use std::collections::HashMap;
  use tempfile::TempDir;
-+
+ 
 +#[cfg(target_os = "solaris")]
 +mod solaris_tests {
 +    use super::*;
@@ -643,14 +671,13 @@ diff --git a/codex-rs/sandboxing/src/manager_tests.rs b/codex-rs/sandboxing/src/
 +            },
 +            permissions: &permissions,
 +            workspace_roots: Some(std::slice::from_ref(&cwd)),
-+            runtime_readable_paths: Some(&[]),
 +            selection: SandboxSelection::Platform {
 +                preference: SandboxablePreference::Require,
 +                windows_sandbox: SandboxType::None,
 +            },
 +            network: Default::default(),
 +            sandbox_policy_cwd: &cwd,
-+            sandbox_exe: None,
++            executables: SandboxExecutables::Launcher(None),
 +            use_legacy_landlock: false,
 +            windows_sandbox_level: WindowsSandboxLevel::Disabled,
 +        };
@@ -675,15 +702,50 @@ diff --git a/codex-rs/sandboxing/src/manager_tests.rs b/codex-rs/sandboxing/src/
 +            key == OsStr::new("SOLARIS_SANDBOX_TEST") && value == Some(OsStr::new("preserved"))
 +        }));
 +    }
++
++    #[test]
++    fn solaris_rejects_managed_network_enforcement() {
++        let temp = tempfile::tempdir().expect("workspace");
++        let cwd = AbsolutePathBuf::from_absolute_path(temp.path()).expect("absolute cwd");
++        let cwd = PathUri::from_abs_path(&cwd);
++        let permissions = PermissionProfile::read_only();
++        let error = SandboxManager::new()
++            .transform(SandboxTransformRequest {
++                command: SandboxCommand {
++                    program: "helper".into(),
++                    args: Vec::new(),
++                    cwd: cwd.clone(),
++                    env: HashMap::new(),
++                    managed_network: None,
++                    additional_permissions: None,
++                },
++                permissions: &permissions,
++                workspace_roots: None,
++                selection: SandboxSelection::Explicit(SandboxType::SolarisExtendedPrivileges),
++                network: SandboxNetwork::new(true, None, None),
++                sandbox_policy_cwd: &cwd,
++                executables: SandboxExecutables::Launcher(None),
++                use_legacy_landlock: false,
++                windows_sandbox_level: WindowsSandboxLevel::Disabled,
++            })
++            .err()
++            .expect("unsupported managed networking must fail closed");
++        assert!(
++            error
++                .to_string()
++                .contains("cannot enforce managed networking")
++        );
++    }
 +}
-
++
  #[test]
  fn danger_full_access_defaults_to_no_sandbox_without_network_requirements() {
+     let manager = SandboxManager::new();
 diff --git a/codex-rs/sandboxing/src/solaris.rs b/codex-rs/sandboxing/src/solaris.rs
 new file mode 100644
 --- /dev/null
 +++ b/codex-rs/sandboxing/src/solaris.rs
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,176 @@
 +use codex_protocol::models::PermissionProfile;
 +use codex_utils_absolute_path::AbsolutePathBuf;
 +use std::collections::BTreeSet;
@@ -701,6 +763,28 @@ new file mode 100644
 +    "/system",
 +    "/usr",
 +];
++
++pub(super) struct Solaris;
++
++impl crate::manager::SandboxBackend for Solaris {
++    fn prepare(
++        &mut self,
++        exec: &mut crate::SandboxExecRequest,
++        _cwd: &AbsolutePathBuf,
++        policy_cwd: &AbsolutePathBuf,
++    ) -> Result<(), crate::SandboxTransformError> {
++        let args = create_solaris_privileges_command_args(
++            std::mem::take(&mut exec.command),
++            &exec.permission_profile,
++            policy_cwd.as_path(),
++        )
++        .map_err(crate::SandboxTransformError::SolarisSandboxPreparation)?;
++        exec.command = std::iter::once(SOLARIS_PATH_TO_PPRIV_EXECUTABLE.to_owned())
++            .chain(args)
++            .collect();
++        Ok(())
++    }
++}
 +
 +pub(crate) fn create_solaris_privileges_command_args(
 +    command: Vec<String>,
@@ -839,7 +923,6 @@ new file mode 100644
 +    }
 +}
 diff --git a/codex-rs/sandboxing/src/violation.rs b/codex-rs/sandboxing/src/violation.rs
-diff --git a/codex-rs/sandboxing/src/violation.rs b/codex-rs/sandboxing/src/violation.rs
 --- a/codex-rs/sandboxing/src/violation.rs
 +++ b/codex-rs/sandboxing/src/violation.rs
 @@ -49,6 +49,7 @@
@@ -871,7 +954,7 @@ diff --git a/codex-rs/sandboxing/src/violation.rs b/codex-rs/sandboxing/src/viol
 diff --git a/codex-rs/cli/src/debug_sandbox.rs b/codex-rs/cli/src/debug_sandbox.rs
 --- a/codex-rs/cli/src/debug_sandbox.rs
 +++ b/codex-rs/cli/src/debug_sandbox.rs
-@@ -395,6 +395,7 @@
+@@ -495,6 +495,7 @@
          WindowsMxc => Some(std::env::current_exe()?),
          SandboxBackend::None
          | SandboxBackend::MacosSeatbelt
@@ -882,7 +965,7 @@ diff --git a/codex-rs/cli/src/debug_sandbox.rs b/codex-rs/cli/src/debug_sandbox.
 diff --git a/codex-rs/sandboxing/src/launch.rs b/codex-rs/sandboxing/src/launch.rs
 --- a/codex-rs/sandboxing/src/launch.rs
 +++ b/codex-rs/sandboxing/src/launch.rs
-@@ -109,6 +109,7 @@
+@@ -99,6 +99,7 @@
      fn shell_script_index(&self, expected: &[String]) -> Option<usize> {
          match self.request.sandbox {
              SandboxType::None | SandboxType::MacosSeatbelt | SandboxType::LinuxSeccomp => {}

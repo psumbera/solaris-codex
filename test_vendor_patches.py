@@ -92,17 +92,28 @@ class VendorPatchTests(unittest.TestCase):
         root = self.crate("mxc-sdk", {
             "src/core/mxc_engine/dispatch.rs":
                 "    ensure_host_supported()?;\n" +
-                "    crate::mxc_engine::run::log_policy_hash(request, logger);\n" * 2,
+                "    crate::mxc_engine::run::log_policy_hash(request, logger);\n" * 3,
             "src/core/mxc_common/telemetry/correlation_state.rs":
                 "#[cfg(unix)]\nfn try_lock_file(file: &fs::File) -> bool {\n}\n",
         })
         self.assert_idempotent("patch_vendored_mxc")
         dispatch = (root / "src/core/mxc_engine/dispatch.rs").read_text()
         self.assertIn("ensure_host_supported()?;", dispatch)
-        self.assertEqual(dispatch.count("#[cfg(any("), 2)
+        self.assertEqual(dispatch.count("#[cfg(any("), 3)
         self.assertIn("file.try_lock().is_ok()", (
             root / "src/core/mxc_common/telemetry/correlation_state.rs").read_text())
         self.check_checksums(root)
+
+    def test_unknown_mxc_dispatch_layout_fails(self):
+        self.crate("mxc-sdk", {
+            "src/core/mxc_engine/dispatch.rs":
+                "    crate::mxc_engine::run::log_policy_hash(request, logger);\n" * 2,
+            "src/core/mxc_common/telemetry/correlation_state.rs":
+                "#[cfg(unix)]\nfn try_lock_file(file: &fs::File) -> bool {\n}\n",
+        })
+        result = self.run_patch("patch_vendored_mxc")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("failed to patch mxc-sdk", result.stderr)
 
     def mio(self, waker=None):
         for name in ("event_ports.rs", "selector.rs"):

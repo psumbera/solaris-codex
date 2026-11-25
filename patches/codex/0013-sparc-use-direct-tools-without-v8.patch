@@ -12,7 +12,7 @@ unstable-feature warning test uses a feature available on every architecture.
 diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
-@@ -607,6 +607,19 @@
+@@ -672,6 +672,19 @@
      }
  
      pub fn enabled(&self, f: Feature) -> bool {
@@ -35,7 +35,7 @@ diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
 --- a/codex-rs/core/src/thread_manager.rs
 +++ b/codex-rs/core/src/thread_manager.rs
-@@ -638,8 +638,9 @@
+@@ -696,8 +696,9 @@
              codex_apps_tools_cache,
          ));
          let code_mode_session_provider: Arc<dyn CodeModeSessionProvider> =
@@ -50,7 +50,7 @@ diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_mana
 diff --git a/codex-rs/core/src/tools/mod.rs b/codex-rs/core/src/tools/mod.rs
 --- a/codex-rs/core/src/tools/mod.rs
 +++ b/codex-rs/core/src/tools/mod.rs
-@@ -64,6 +64,11 @@
+@@ -67,6 +67,11 @@
  }
  
  pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
@@ -65,7 +65,7 @@ diff --git a/codex-rs/core/src/tools/mod.rs b/codex-rs/core/src/tools/mod.rs
 diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
 --- a/codex-rs/features/src/tests.rs
 +++ b/codex-rs/features/src/tests.rs
-@@ -183,8 +183,29 @@
+@@ -186,8 +186,29 @@
      features.enable(Feature::CodeModeOnly);
      features.normalize_dependencies();
  
@@ -97,7 +97,7 @@ diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
  }
  
  #[test]
-@@ -608,8 +629,9 @@
+@@ -655,8 +676,9 @@
      );
  
      assert_eq!(features.enabled(Feature::Plugins), true);
@@ -109,7 +109,7 @@ diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
      assert_eq!(features.enabled(Feature::ApplyPatchFreeform), false);
      assert_eq!(features.enabled(Feature::WebSearchRequest), false);
  }
-@@ -935,14 +957,14 @@
+@@ -1005,14 +1027,14 @@
      let configured_features: Table = toml::from_str(
          r#"
  multi_agent_v2 = { enabled = true, tool_namespace = "agents" }
@@ -126,7 +126,7 @@ diff --git a/codex-rs/features/src/tests.rs b/codex-rs/features/src/tests.rs
  
      let warning = unstable_features_warning_event(
          Some(&configured_features),
-@@ -956,7 +978,7 @@
+@@ -1026,7 +1048,7 @@
          panic!("expected warning event");
      };
      assert_eq!(

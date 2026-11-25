@@ -15,15 +15,14 @@ https://github.com/openai/codex/issues/4242
 diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 --- a/codex-rs/features/src/lib.rs
 +++ b/codex-rs/features/src/lib.rs
-@@ -1577,11 +1577,15 @@
+@@ -1695,12 +1695,16 @@
+     FeatureSpec {
          id: Feature::RespectSystemProxy,
          key: "respect_system_proxy",
 -        stage: Stage::Experimental {
 -            name: "System proxy",
 -            menu_description: "Use macOS or Windows system proxy settings for Codex requests.",
 -            announcement: "",
--        },
--        default_enabled: false,
 +        stage: if cfg!(target_os = "solaris") {
 +            Stage::Stable
 +        } else {
@@ -32,7 +31,8 @@ diff --git a/codex-rs/features/src/lib.rs b/codex-rs/features/src/lib.rs
 +                menu_description: "Use macOS or Windows system proxy settings for Codex requests.",
 +                announcement: "",
 +            }
-+        },
+         },
+-        default_enabled: false,
 +        default_enabled: cfg!(target_os = "solaris"),
      },
      FeatureSpec {
